@@ -1,5 +1,5 @@
 plugins {
-    alias(libs.plugins.android.application)
+    id("com.android.application")
 }
 
 android {
@@ -33,10 +33,17 @@ android {
 
 dependencies {
 
-    implementation(libs.appcompat)
+
     implementation(libs.material)
     implementation(libs.activity)
-    implementation(libs.constraintlayout)
+    // 降级 constraintlayout 版本
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+
+    // 降级 appcompat 版本
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation(libs.gridlayout)
+
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
