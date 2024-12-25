@@ -17,6 +17,7 @@ dependencyResolutionManagement {
         gradlePluginPortal()
         google()
         mavenCentral()
+        jcenter()
     }
 }
 enableFeaturePreview("VERSION_CATALOGS")

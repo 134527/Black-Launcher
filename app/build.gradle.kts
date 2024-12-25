@@ -31,6 +31,8 @@ android {
     }
 }
 
+
+
 dependencies {
 
 
@@ -42,7 +44,7 @@ dependencies {
     // 降级 appcompat 版本
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation(libs.gridlayout)
-
+    implementation ("com.google.code.gson:gson:2.8.7")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)

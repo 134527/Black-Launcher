@@ -24,6 +24,7 @@ import com.msk.blacklauncher.adapters.ViewPagerAdapter;
 import com.msk.blacklauncher.fragments.AppsFragment;
 import com.msk.blacklauncher.fragments.ChecklistAndNotesFragment;
 import com.msk.blacklauncher.fragments.HomeFragment;
+import com.msk.blacklauncher.fragments.WorkspaceFragment;
 import com.msk.blacklauncher.model.AppModel;
 
 import java.util.ArrayList;
@@ -33,6 +34,8 @@ import java.util.Set;
 public class MainActivity extends AppCompatActivity {
 
     private TextView timeTextView, dateTextView;
+    private ViewPager2 viewPager;
+    private ViewPagerAdapter adapter;
     private Handler handler = new Handler();
 
     @Override
@@ -42,11 +45,11 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         ViewPager2 viewPager = findViewById(R.id.viewPager);
-        ViewPagerAdapter adapter = new ViewPagerAdapter(this);
+        ViewPagerAdapter adapter = new ViewPagerAdapter(getSupportFragmentManager(), getLifecycle());
 
         // Fetch installed apps and set adapter
         List<AppModel> appsList = getInstalledApps(getApplicationContext());
-        setupViewPager(viewPager, adapter, appsList);
+//        setupViewPager(viewPager, adapter, appsList);
         // Log the app names
         StringBuilder appNames = new StringBuilder("Installed Apps: ");
         for (AppModel app : appsList) {
@@ -54,11 +57,13 @@ public class MainActivity extends AppCompatActivity {
         }
         Log.i("AppsFragment", appNames.toString());
 
-        adapter.addFragment(new ChecklistAndNotesFragment()); // Add apps list fragment here
+//        adapter.addFragment(new ChecklistAndNotesFragment()); // Add apps list fragment here
         adapter.addFragment(new HomeFragment()); // Add your home fragment here
-        adapter.addFragment(new AppsFragment()); // Add apps list fragment here
-
+//        adapter.addFragment(new AppsFragment()); // Add apps list fragment here
+        adapter.addFragment(new WorkspaceFragment());
         viewPager.setAdapter(adapter);
+        viewPager.setCurrentItem(0);
+
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.viewPager), (v, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());

@@ -15,6 +15,9 @@ public class AppModel implements Parcelable {
         this.packageName = packageName;
     }
 
+
+
+
     // Getter methods
     public String getAppName() {
         return appName;
@@ -32,12 +35,13 @@ public class AppModel implements Parcelable {
     protected AppModel(Parcel in) {
         appName = in.readString();
         packageName = in.readString();
-        appIcon = null; // Drawable cannot be passed; handle this separately if needed.
+        appIcon = in.readParcelable(Drawable.class.getClassLoader());; // Drawable cannot be passed; handle this separately if needed.
     }
 
     @Override
     public void writeToParcel(Parcel dest, int flags) {
         dest.writeString(appName);
+
         dest.writeString(packageName);
         // Drawable not written due to its complex nature.
     }
