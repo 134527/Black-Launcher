@@ -1,5 +1,9 @@
 package com.msk.blacklauncher.fragments;
 
+import android.animation.Animator;
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -105,6 +109,7 @@ public class HomeFragment extends Fragment {
         whiteboardCard = view.findViewById(R.id.whiteboardCard);
         toolsCard = view.findViewById(R.id.toolsCard);
         categorizeAndDisplayApps();
+        setupClickListeners(); // 初始化点击监听器
 //        appsCard = view.findViewById(R.id.appsCard);
     }
 
@@ -114,13 +119,11 @@ public class HomeFragment extends Fragment {
             // 实现搜索功能
         });
 
-        // 设置卡片点击事件
-        tvModeCard.setOnClickListener(v -> launchTVMode());
-        themeCard.setOnClickListener(v -> openThemeSettings());
-        screensaverCard.setOnClickListener(v -> openScreensaver());
-        whiteboardCard.setOnClickListener(v -> openWhiteboard());
+        tvModeCard.setOnClickListener(v -> handleCardClick(v, this::launchTVModeDialog));
+        themeCard.setOnClickListener(v -> handleCardClick(v, this::openThemeSettings));
+        screensaverCard.setOnClickListener(v -> handleCardClick(v, this::openScreensaver));
+        whiteboardCard.setOnClickListener(v -> handleCardClick(v, this::openWhiteboard));
         toolsCard.setOnClickListener(v -> openToolsGrid());
-        appsCard.setOnClickListener(v -> openAppsGrid());
 
         // 如果需要设置长按事件，确保对应的视图已经初始化
         if (timeText != null) {
@@ -137,6 +140,49 @@ public class HomeFragment extends Fragment {
             });
         }
     }
+
+
+    private void handleCardClick(View view, Runnable action) {
+        // 创建缩放动画
+        ObjectAnimator scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1f, 0.9f, 1f);
+        ObjectAnimator scaleY = ObjectAnimator.ofFloat(view, "scaleY", 1f, 0.9f, 1f);
+        AnimatorSet animatorSet = new AnimatorSet();
+        animatorSet.playTogether(scaleX, scaleY);
+        animatorSet.setDuration(200);
+        animatorSet.addListener(new Animator.AnimatorListener() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+                // 动画开始时
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                // 动画结束时执行点击事件
+                action.run();
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                // 动画取消时
+            }
+
+            @Override
+            public void onAnimationRepeat(Animator animation) {
+                // 动画重复时
+            }
+        });
+        animatorSet.start();
+    }
+
+    private void launchTVModeDialog() {
+        new AlertDialog.Builder(getContext(), R.style.CustomAlertDialog)
+                .setTitle("启用TV模式")
+                .setMessage("是否启用TV模式？")
+                .setPositiveButton("是", (dialog, which) -> launchTVMode())
+                .setNegativeButton("否", null)
+                .show();
+    }
+
 
     // 修改应用分类枚举
     private enum AppCategory {
@@ -373,7 +419,7 @@ public class HomeFragment extends Fragment {
         handler.removeCallbacksAndMessages(null);
     }
     private void launchTVMode() {
-        // 实现TV模式启动逻辑
+        new AlertDialog.Builder(getContext(), R.style.CustomAlertDialog) .setMessage("TV模式正在开发？").show();
     }
 
     private void openThemeSettings() {

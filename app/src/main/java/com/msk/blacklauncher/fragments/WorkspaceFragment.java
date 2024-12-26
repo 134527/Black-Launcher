@@ -38,7 +38,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-public class WorkspaceFragment extends Fragment {
+ public class WorkspaceFragment extends Fragment {
 
     private static final String PREFS_NAME = "WorkspacePrefs";
     private static final String APP_POSITIONS_KEY = "AppPositions";

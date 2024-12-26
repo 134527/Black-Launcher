@@ -1,5 +1,7 @@
 package com.msk.blacklauncher;
 
+import android.appwidget.AppWidgetHost;
+import android.appwidget.AppWidgetManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
@@ -37,13 +39,18 @@ public class MainActivity extends AppCompatActivity {
     private ViewPager2 viewPager;
     private ViewPagerAdapter adapter;
     private Handler handler = new Handler();
+    private AppWidgetHost mAppWidgetHost;
+    private AppWidgetManager mAppWidgetManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
-
+        mAppWidgetManager = AppWidgetManager.getInstance(getApplicationContext());
+        mAppWidgetHost = new AppWidgetHost(getApplicationContext(), 0xfffff);
+        //开始监听widget的变化
+        mAppWidgetHost.startListening();
         ViewPager2 viewPager = findViewById(R.id.viewPager);
         ViewPagerAdapter adapter = new ViewPagerAdapter(getSupportFragmentManager(), getLifecycle());
 
