@@ -3,12 +3,11 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/black">
+    >
 
     <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#33000000"
         android:id="@+id/dateTextView">
 
         <!-- Timer -->
@@ -40,7 +39,8 @@
             android:id="@+id/searchButton"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:src="@drawable/search_bar_bg"
+            android:src="@drawable/launcher_main_search"
+            android:scaleType="fitCenter"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:layout_margin="16dp"
             app:layout_constraintTop_toTopOf="parent"
@@ -57,19 +57,37 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         app:layout_constraintGuide_percent="0.35"/>
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/guidelineStart"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        app:layout_constraintGuide_percent="0.1"/>
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/guidelineEnd"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        app:layout_constraintGuide_percent="0.9"/>
 
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guidelineCenter"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        app:layout_constraintGuide_percent="0.65"/>
+        app:layout_constraintGuide_percent="0.6"/>
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guidelineBottom"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        app:layout_constraintGuide_percent="0.55"/> <!-- 从底部向上35%的位置 -->
+        app:layout_constraintGuide_percent="0.45"/>
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/guidelineTop"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintGuide_percent="0.85"/>
 
 
     <!-- TV模式卡片 -->
@@ -77,13 +95,13 @@
         android:id="@+id/tvModeCard"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_margin="8dp"
+        android:layout_margin="16dp"
         app:cardCornerRadius="24dp"
         app:cardBackgroundColor="#4D4D4D"
-        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintStart_toStartOf="@+id/guidelineStart"
         app:layout_constraintEnd_toStartOf="@id/guidelineLeft"
         app:layout_constraintTop_toTopOf="@id/guidelineBottom"
-        app:layout_constraintBottom_toBottomOf="parent">
+        app:layout_constraintBottom_toBottomOf="@id/guidelineTop">
 
 
     <RelativeLayout
@@ -91,19 +109,25 @@
             android:layout_height="match_parent">
 
             <ImageView
+
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:src="@drawable/tv_mode_background"
+                android:src="@drawable/launcher_main_pattern"
                 android:scaleType="centerCrop"/>
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="TV模式"
-                android:textColor="@android:color/white"
-                android:textSize="20sp"
-                android:layout_alignParentBottom="true"
-                android:layout_margin="16dp"/>
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="TV模式"
+            android:textColor="@android:color/white"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:padding="16dp"
+            android:background="@drawable/blur_text_backgroud"
+            android:layout_alignParentBottom="true"
+            android:layout_centerInParent="true"
+            android:layout_margin="16dp"/>
         </RelativeLayout>
     </androidx.cardview.widget.CardView>
 
@@ -116,23 +140,29 @@
         app:layout_constraintStart_toEndOf="@id/guidelineLeft"
         app:layout_constraintEnd_toStartOf="@id/guidelineCenter"
         app:layout_constraintTop_toTopOf="@id/guidelineBottom"
-        app:layout_constraintBottom_toBottomOf="parent">
+        app:layout_constraintBottom_toBottomOf="@id/guidelineTop">
 
+    <!-- 上方水平布局 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
 
+        android:orientation="horizontal">
     <!-- 桌面主题卡片 -->
         <androidx.cardview.widget.CardView
             android:id="@+id/themeCard"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_margin="4dp"
+            android:layout_margin="8dp"
             app:cardCornerRadius="24dp"
             app:cardBackgroundColor="#FFA500">
 
             <ImageView
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:src="@drawable/desktop_theme_background"
+                android:src="@drawable/launcher_wrapper_btn"
                 android:scaleType="centerCrop"/>
 
             <TextView
@@ -141,24 +171,25 @@
                 android:text="桌面主题"
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
-                android:layout_gravity="bottom|start"
+
+                android:layout_gravity="bottom|center"
                 android:layout_margin="16dp"/>
         </androidx.cardview.widget.CardView>
 
         <!-- 艺术屏保卡片 -->
         <androidx.cardview.widget.CardView
             android:id="@+id/screensaverCard"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_margin="4dp"
+            android:layout_margin="8dp"
             app:cardCornerRadius="24dp"
             app:cardBackgroundColor="#0066CC">
 
             <ImageView
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:src="@drawable/card_background"
+                android:src="@drawable/launcher_art_btn"
                 android:scaleType="centerCrop"/>
 
             <TextView
@@ -167,34 +198,57 @@
                 android:text="艺术屏保"
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
-                android:layout_gravity="bottom|start"
+                android:layout_gravity="bottom|center"
                 android:layout_margin="16dp"/>
         </androidx.cardview.widget.CardView>
+    </LinearLayout>
 
         <!-- 电子白板卡片 -->
         <androidx.cardview.widget.CardView
             android:id="@+id/whiteboardCard"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_margin="4dp"
+            android:layout_weight="0.8"
+            android:layout_margin="8dp"
             app:cardCornerRadius="24dp"
             app:cardBackgroundColor="#666666">
 
-            <ImageView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:src="@drawable/whiteboard_background"
-                android:scaleType="centerCrop"/>
+                android:orientation="horizontal">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="电子白板"
-                android:textColor="@android:color/white"
-                android:textSize="16sp"
-                android:layout_gravity="bottom|start"
-                android:layout_margin="16dp"/>
+                <!-- 左侧图片 -->
+                <ImageView
+                    android:layout_width="0dp"
+                    android:layout_weight="0.3"
+                    android:layout_height="match_parent"
+                    android:src="@drawable/launcher_drawing_left_icon"
+                    android:scaleType="fitCenter"
+                    android:layout_margin="16dp"/>
+
+                <!-- 中间文字 -->
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="电子白板"
+                    android:textColor="@android:color/white"
+                    android:textSize="30sp"
+                    android:layout_gravity="center"
+                    android:gravity="center"/>
+
+                <!-- 右侧图片 -->
+                <ImageView
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="match_parent"
+                    android:src="@drawable/launcher_drawing_bg"
+                    android:scaleType="fitCenter"
+                    android:layout_margin="16dp"
+                    android:adjustViewBounds="true"/>
+
+            </LinearLayout>
         </androidx.cardview.widget.CardView>
     </LinearLayout>
 
@@ -205,17 +259,18 @@
         android:orientation="vertical"
         android:layout_margin="8dp"
         app:layout_constraintStart_toEndOf="@id/guidelineCenter"
-        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintEnd_toEndOf="@+id/guidelineEnd"
         app:layout_constraintTop_toTopOf="@id/guidelineBottom"
-        app:layout_constraintBottom_toBottomOf="parent">
+        app:layout_constraintBottom_toBottomOf="@id/guidelineTop">
 
     <!-- 基础工具卡片 -->
         <androidx.cardview.widget.CardView
             android:id="@+id/toolsCard"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_margin="4dp"
+            android:layout_weight="1.1"
+            android:layout_margin="8dp"
+
             app:cardCornerRadius="24dp"
             app:cardBackgroundColor="#808080">
 
@@ -225,12 +280,27 @@
                 android:orientation="vertical"
                 android:padding="16dp">
 
-                <TextView
+                <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="基础工具"
-                    android:textColor="@android:color/white"
-                    android:textSize="20sp"/>
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <ImageView
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:src="@drawable/tag_tool_icon"
+                        android:layout_marginEnd="8dp"
+                        android:scaleType="fitCenter"/>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="基础工具"
+                        android:textColor="@android:color/white"
+                        android:textSize="32sp"/>
+
+                </LinearLayout>
 
                 <HorizontalScrollView
                     android:id="@+id/basicToolsContainer"
@@ -254,6 +324,7 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
+
             android:orientation="horizontal">
 
             <!-- 基础设置卡片 -->
@@ -265,12 +336,18 @@
                 android:gravity="center">
 
                 <androidx.cardview.widget.CardView
+                    android:id="@+id/settingsCardView"
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"
-                    android:layout_margin="4dp"
+                    android:layout_margin="8dp"
                     app:cardCornerRadius="24dp"
                     app:cardBackgroundColor="#4D4D4D">
+                    <FrameLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent">
+
+
                     <ScrollView
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
@@ -287,6 +364,15 @@
 
                     </GridLayout>
                     </ScrollView>
+                        <!-- 添加透明遮罩层用于处理点击事件 -->
+                        <View
+                            android:id="@+id/settingsCardOverlay"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="@android:color/transparent"
+                            android:clickable="true"
+                            android:focusable="true"/>
+                    </FrameLayout>
                 </androidx.cardview.widget.CardView>
 
                 <TextView
@@ -307,12 +393,17 @@
                 android:gravity="center">
 
                 <androidx.cardview.widget.CardView
+                    android:id="@+id/officeCardView"
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"
-                    android:layout_margin="4dp"
+                    android:layout_margin="8dp"
                     app:cardCornerRadius="24dp"
                     app:cardBackgroundColor="#4D4D4D">
+                    <FrameLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent">
+
                     <ScrollView
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
@@ -328,6 +419,15 @@
                         <!-- 9个应用图标位置 -->
                     </GridLayout>
                     </ScrollView>
+                        <!-- 添加透明遮罩层用于处理点击事件 -->
+                        <View
+                            android:id="@+id/officeCardOverlay"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="@android:color/transparent"
+                            android:clickable="true"
+                            android:focusable="true"/>
+                    </FrameLayout>
                 </androidx.cardview.widget.CardView>
 
                 <TextView
@@ -348,12 +448,17 @@
                 android:gravity="center">
 
                 <androidx.cardview.widget.CardView
+                    android:id="@+id/appsCardView"
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"
-                    android:layout_margin="4dp"
+                    android:layout_margin="8dp"
                     app:cardCornerRadius="24dp"
                     app:cardBackgroundColor="#4D4D4D">
+                    <FrameLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent">
+
 
                     <ScrollView
                         android:layout_width="match_parent"
@@ -368,6 +473,14 @@
                             android:padding="8dp">
                         </GridLayout>
                     </ScrollView>
+                        <!-- 添加透明遮罩层用于处理点击事件 -->
+                        <View
+                            android:id="@+id/appsCardOverlay"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="@android:color/transparent"
+                           />
+                    </FrameLayout>
                 </androidx.cardview.widget.CardView>
 
                 <TextView

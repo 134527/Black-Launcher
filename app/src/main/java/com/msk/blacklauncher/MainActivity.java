@@ -1,16 +1,24 @@
 package com.msk.blacklauncher;
 
+import android.app.WallpaperManager;
 import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.preference.PreferenceManager;
 import android.util.Log;
+import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.widget.TextView;
 
 import androidx.activity.EdgeToEdge;
@@ -47,11 +55,27 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
+
+        // 设置全屏和透明状态栏
+        getWindow().setFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        );
+
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
+
+        // 设置窗口背景为透明
+        getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+
+        setContentView(R.layout.activity_main);
+
+
         mAppWidgetManager = AppWidgetManager.getInstance(getApplicationContext());
         mAppWidgetHost = new AppWidgetHost(getApplicationContext(), 0xfffff);
         //开始监听widget的变化
         mAppWidgetHost.startListening();
         ViewPager2 viewPager = findViewById(R.id.viewPager);
+
         ViewPagerAdapter adapter = new ViewPagerAdapter(getSupportFragmentManager(), getLifecycle());
 
         // Fetch installed apps and set adapter
@@ -70,7 +94,13 @@ public class MainActivity extends AppCompatActivity {
         adapter.addFragment(new WorkspaceFragment());
         viewPager.setAdapter(adapter);
         viewPager.setCurrentItem(0);
-
+        // 注册 Home 键监听
+        getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(visibility -> {
+            // 当从其他应用返回时，确保回到首页
+            if (viewPager != null) {
+                viewPager.setCurrentItem(0, true);
+            }
+        });
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.viewPager), (v, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
@@ -79,7 +109,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // In MainActivity or the fragment manager for handling the swipe
-        viewPager.setCurrentItem(1); // Or use a gesture detector to trigger this fragment
+//        viewPager.setCurrentItem(1); // Or use a gesture detector to trigger this fragment
 
         // Replace "custom_font.ttf" with the actual font file in the assets folder
 //        FontOverride.setDefaultFont(this, "DEFAULT", "fonts/caveat.ttf");
@@ -128,5 +158,14 @@ public class MainActivity extends AppCompatActivity {
         appsList.sort((app1, app2) -> app1.getAppName().compareToIgnoreCase(app2.getAppName()));
 
         return appsList;
+    }
+    // 添加 onResume 方法来处理从后台返回
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 从后台返回时也切换到首页
+        if (viewPager != null) {
+            viewPager.setCurrentItem(0, true);
+        }
     }
 }

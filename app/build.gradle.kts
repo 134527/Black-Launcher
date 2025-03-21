@@ -40,7 +40,9 @@ dependencies {
     implementation(libs.activity)
     // 降级 constraintlayout 版本
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-
+    implementation("androidx.core:core:1.12.0")
+    implementation("androidx.window:window:1.2.0")
+    implementation("androidx.core:core-ktx:1.12.0")
     // 降级 appcompat 版本
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation(libs.gridlayout)

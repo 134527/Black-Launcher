@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 半透明背景层 -->
+    <item>
+        <shape>
+            <solid android:color="#33FFFFFF"/> <!-- 20% 透明度的白色 -->
+            <corners android:radius="24dp"/>
+        </shape>
+    </item>
+    <!-- 模糊效果层 -->
+    <item>
+        <shape>
+            <solid android:color="#26FFFFFF"/> <!-- 15% 透明度的白色 -->
+            <corners android:radius="24dp"/>
+        </shape>
+    </item>
+</layer-list>

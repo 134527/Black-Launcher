@@ -27,6 +27,8 @@ import androidx.viewpager.widget.PagerAdapter;
 import androidx.viewpager.widget.ViewPager;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.annotations.Expose;
 import com.google.gson.reflect.TypeToken;
 import com.msk.blacklauncher.R;
 import com.msk.blacklauncher.model.AppModel;
@@ -42,7 +44,7 @@ import java.util.List;
 
     private static final String PREFS_NAME = "WorkspacePrefs";
     private static final String APP_POSITIONS_KEY = "AppPositions";
-    private static final int PAGE_COUNT = 2; // 默认页数
+//    private static final int PAGE_COUNT = 2; // 默认页数
     private static final int COLUMNS = 4;
     private static final int ROWS = 5;
 
@@ -51,6 +53,25 @@ import java.util.List;
     private List<List<CellLayout.Cell>> workspaceCells;
     private PackageManager packageManager;
 
+     private static class SerializableAppPosition {
+         @Expose
+         private String packageName;
+         @Expose
+         private int pageIndex;
+         @Expose
+         private int positionInPage;
+
+         public SerializableAppPosition(String packageName, int pageIndex, int positionInPage) {
+             this.packageName = packageName;
+             this.pageIndex = pageIndex;
+             this.positionInPage = positionInPage;
+         }
+
+         // getter方法
+         public String getPackageName() { return packageName; }
+         public int getPageIndex() { return pageIndex; }
+         public int getPositionInPage() { return positionInPage; }
+     }
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -76,117 +97,228 @@ import java.util.List;
         initPageIndicator();
         return view;
     }
+     private void setupWorkspacePage(int pageIndex) {
+         if (pageIndex >= workspaceCells.size()) {
+             return;
+         }
 
-    private List<List<CellLayout.Cell>> initializeWorkspaceApps() {
-        List<List<CellLayout.Cell>> pages = new ArrayList<>();
-        List<ApplicationInfo> installedApps = packageManager.getInstalledApplications(PackageManager.GET_META_DATA);
-        List<AppModel> allApps = new ArrayList<>();
+         List<CellLayout.Cell> pageCells = workspaceCells.get(pageIndex);
+         for (int i = 0; i < pageCells.size(); i++) {
+             CellLayout.Cell cell = pageCells.get(i);
 
-        for (ApplicationInfo appInfo : installedApps) {
-            if (packageManager.getLaunchIntentForPackage(appInfo.packageName) != null) {
-                // 可启动的应用
-                Drawable icon = appInfo.loadIcon(packageManager);
-                String label = appInfo.loadLabel(packageManager).toString();
-                String packageName = appInfo.packageName;
-                allApps.add(new AppModel(label, icon, packageName));
-            }
-        }
+             // 检查contentView是否为空，为空则创建
+             if (cell.getContentView() == null) {
+                 if (!cell.getTag().equals("empty")) {
+                     try {
+                         ApplicationInfo appInfo = packageManager.getApplicationInfo(cell.getTag(), 0);
+                         Drawable icon = appInfo.loadIcon(packageManager);
+                         String label = appInfo.loadLabel(packageManager).toString();
 
-        // 对应用进行排序
-        Collections.sort(allApps, new Comparator<AppModel>() {
-            @Override
-            public int compare(AppModel app1, AppModel app2) {
-                return app1.getAppName().compareToIgnoreCase(app2.getAppName());
-            }
-        });
+                         // 创建应用图标视图
+                         View appView = createAppIconView(new AppModel(label, icon, cell.getTag()));
+                         cell.setContentView(appView);
+                     } catch (Exception e) {
+                         Log.e("WorkspaceFragment", "创建应用图标失败: " + e.getMessage());
+                     }
+                 } else {
+                     // 创建空白视图
+                     View emptyView = new View(getContext());
+                     emptyView.setVisibility(View.INVISIBLE);
+                     cell.setContentView(emptyView);
+                 }
+             }
+         }
+     }
+   private List<List<CellLayout.Cell>> initializeWorkspaceApps() {
+         List<List<CellLayout.Cell>> pages = new ArrayList<>();
+         List<ApplicationInfo> installedApps = packageManager.getInstalledApplications(PackageManager.GET_META_DATA);
+         List<AppModel> allApps = new ArrayList<>();
 
-        // 将应用分配到页面
-        int appsPerPage = COLUMNS * ROWS;
-        for (int i = 0; i < PAGE_COUNT; i++) {
-            List<CellLayout.Cell> pageCells = new ArrayList<>();
-            for (int j = 0; j < appsPerPage; j++) {
-                int appIndex = i * appsPerPage + j;
-                if (appIndex < allApps.size()) {
-                    AppModel app = allApps.get(appIndex);
-                    View appIconView = createAppIconView(app);
-                    CellLayout.Cell cell = new CellLayout.Cell(app.getPackageName(), appIconView);
-                    pageCells.add(cell);
-                } else {
-                    // 添加一个空的 Cell
-                    View emptyView = new View(getContext()); // 创建一个空的 View
-                    emptyView.setVisibility(View.INVISIBLE); // 设置为不可见
-                    CellLayout.Cell emptyCell = new CellLayout.Cell("empty", emptyView);
-                    pageCells.add(emptyCell);
-                }
-            }
-            pages.add(pageCells);
-        }
+         // 过滤可启动的应用
+         for (ApplicationInfo appInfo : installedApps) {
+             if (packageManager.getLaunchIntentForPackage(appInfo.packageName) != null) {
+                 Drawable icon = appInfo.loadIcon(packageManager);
+                 String label = appInfo.loadLabel(packageManager).toString();
+                 allApps.add(new AppModel(label, icon, appInfo.packageName));
+             }
+         }
 
-        return pages;
-    }
+         // 计算需要的页数
+         int appsPerPage = COLUMNS * ROWS;
+         int totalPages = (int) Math.ceil(allApps.size() / (float) appsPerPage);
 
-    private void initPageIndicator() {
-        for (int i = 0; i < PAGE_COUNT; i++) {
-            ImageView dot = new ImageView(getContext());
-            dot.setImageResource(i == 0 ? R.drawable.ic_dot_selected : R.drawable.ic_dot_unselected);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-            );
-            params.setMargins(8, 0, 8, 0);
-            pageIndicator.addView(dot, params);
-        }
-    }
+         // 为每一页创建 CellLayout
+         for (int i = 0; i < totalPages; i++) {
+             List<CellLayout.Cell> pageCells = new ArrayList<>();
+             int startIndex = i * appsPerPage;
+             int endIndex = Math.min((i + 1) * appsPerPage, allApps.size());
 
-    private void updatePageIndicator(int position) {
-        for (int i = 0; i < pageIndicator.getChildCount(); i++) {
-            ImageView dot = (ImageView) pageIndicator.getChildAt(i);
-            dot.setImageResource(i == position ? R.drawable.ic_dot_selected : R.drawable.ic_dot_unselected);
-        }
-    }
+             for (int j = startIndex; j < endIndex; j++) {
+                 AppModel app = allApps.get(j);
+                 View appIconView = createAppIconView(app);
+                 CellLayout.Cell cell = new CellLayout.Cell(app.getPackageName(), appIconView);
+                 pageCells.add(cell);
+             }
 
-    private List<List<CellLayout.Cell>> loadAppPositions() {
-        SharedPreferences prefs = requireActivity().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String json = prefs.getString(APP_POSITIONS_KEY, "");
-        if (!json.isEmpty()) {
-            Gson gson = new Gson();
-            Type type = new TypeToken<List<List<CellLayout.Cell>>>() {}.getType();
-            List<List<CellLayout.Cell>> loadedCells = gson.fromJson(json, type);
+             // 填充空白位置
+             while (pageCells.size() < appsPerPage) {
+                 View emptyView = new View(getContext());
+                 emptyView.setVisibility(View.INVISIBLE);
+                 CellLayout.Cell emptyCell = new CellLayout.Cell("empty", emptyView);
+                 pageCells.add(emptyCell);
+             }
 
-            // 遍历加载的 Cell 列表，为每个 Cell 重新创建 View
-            for (List<CellLayout.Cell> pageCells : loadedCells) {
-                for (CellLayout.Cell cell : pageCells) {
-                    if (!cell.getTag().equals("empty")) {
-                        try {
-                            ApplicationInfo appInfo = packageManager.getApplicationInfo(cell.getTag(), 0);
-                            AppModel app = new AppModel(appInfo.loadLabel(packageManager).toString(), appInfo.loadIcon(packageManager), cell.getTag());
-                            View appIconView = createAppIconView(app);
-                            cell.setContentView(appIconView); // 更新 Cell 的 ContentView
-                        } catch (PackageManager.NameNotFoundException e) {
-                            Log.e("WorkspaceFragment", "App not found: " + cell.getTag(), e);
-                        }
-                    } else {
-                        // 为空的 Cell 创建一个空的 View
-                        View emptyView = new View(getContext());
-                        emptyView.setVisibility(View.INVISIBLE);
-                        cell.setContentView(emptyView);
-                    }
-                }
-            }
+             pages.add(pageCells);
+         }
 
-            return loadedCells;
-        }
-        return Collections.emptyList();
-    }
+         return pages;
+     }
+
+     // 更新页面指示器，使其动态适应页面数量
+     private void initPageIndicator() {
+         pageIndicator.removeAllViews();
+         for (int i = 0; i < workspaceCells.size(); i++) {
+             View indicator = new View(getContext());
+             int size = (int) getResources().getDimension(R.dimen.page_indicator_size);
+             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
+             int margin = (int) getResources().getDimension(R.dimen.page_indicator_margin);
+             params.setMargins(margin, 0, margin, 0);
+             indicator.setLayoutParams(params);
+             indicator.setBackgroundResource(R.drawable.page_indicator);
+             pageIndicator.addView(indicator);
+         }
+         updatePageIndicator(0);
+     }
+
+     private void updatePageIndicator(int currentPage) {
+         for (int i = 0; i < pageIndicator.getChildCount(); i++) {
+             View indicator = pageIndicator.getChildAt(i);
+             indicator.setSelected(i == currentPage);
+         }
+     }
+
+private List<List<CellLayout.Cell>> loadAppPositions() {
+         List<List<CellLayout.Cell>> result = new ArrayList<>();
+
+         try {
+             SharedPreferences prefs = requireActivity().getSharedPreferences(
+                     "workspace_prefs", Context.MODE_PRIVATE);
+             String json = prefs.getString("app_positions", "");
+
+             if (!TextUtils.isEmpty(json)) {
+                 Gson gson = new Gson();
+                 Type type = new TypeToken<List<SerializableAppPosition>>(){}.getType();
+                 List<SerializableAppPosition> savedPositions = gson.fromJson(json, type);
+
+                 // 初始化空白桌面
+                 result = initializeEmptyWorkspace(Math.max(1, getMaxPageIndex(savedPositions) + 1));
+
+                 // 恢复应用位置
+                 for (SerializableAppPosition position : savedPositions) {
+                     // 确保页面索引有效
+                     while (result.size() <= position.getPageIndex()) {
+                         result.add(createEmptyPage());
+                     }
+
+                     // 获取应用信息
+                     String packageName = position.getPackageName();
+
+                     try {
+                         ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
+                         Drawable icon = appInfo.loadIcon(packageManager);
+                         String label = appInfo.loadLabel(packageManager).toString();
+
+                         // 创建应用图标
+                         View appView = createAppIconView(new AppModel(label, icon, packageName));
+                         CellLayout.Cell cell = new CellLayout.Cell(packageName, appView);
+
+                         // 放置到指定位置
+                         List<CellLayout.Cell> page = result.get(position.getPageIndex());
+                         if (position.getPositionInPage() < page.size()) {
+                             page.set(position.getPositionInPage(), cell);
+                         }
+                     } catch (PackageManager.NameNotFoundException e) {
+                         Log.w("WorkspaceFragment", "应用不存在: " + packageName);
+                     }
+                 }
+             }
+         } catch (Exception e) {
+             Log.e("WorkspaceFragment", "加载应用位置时出错", e);
+             // 如果加载失败，返回空列表，外部会处理
+         }
+
+         return result;
+     }
+
+     /**
+      * 初始化空白工作区
+      */
+     private List<List<CellLayout.Cell>> initializeEmptyWorkspace(int pageCount) {
+         List<List<CellLayout.Cell>> pages = new ArrayList<>();
+
+         for (int i = 0; i < pageCount; i++) {
+             pages.add(createEmptyPage());
+         }
+
+         return pages;
+     }
+
+
+
+     // 获取最大页面索引的辅助方法
+     private int getMaxPageIndex(List<SerializableAppPosition> positions) {
+         int maxPageIndex = 0;
+         for (SerializableAppPosition position : positions) {
+             maxPageIndex = Math.max(maxPageIndex, position.getPageIndex());
+         }
+         return maxPageIndex;
+     }
+
+     // 创建空白页的辅助方法
+     private List<CellLayout.Cell> createEmptyPage() {
+         List<CellLayout.Cell> page = new ArrayList<>();
+         int appsPerPage = COLUMNS * ROWS;
+
+         for (int i = 0; i < appsPerPage; i++) {
+             View emptyView = new View(getContext());
+             emptyView.setVisibility(View.INVISIBLE);
+             CellLayout.Cell emptyCell = new CellLayout.Cell("empty", emptyView);
+             page.add(emptyCell);
+         }
+
+         return page;
+     }
 
     private void saveAppPositions() {
-        SharedPreferences prefs = requireActivity().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
-        Gson gson = new Gson();
-        String json = gson.toJson(workspaceCells);
-        editor.putString(APP_POSITIONS_KEY, json);
-        editor.apply();
-    }
+         try {
+             List<SerializableAppPosition> appPositions = new ArrayList<>();
+
+             // 遍历所有页面和应用，只保存非空应用的位置信息
+             for (int pageIndex = 0; pageIndex < workspaceCells.size(); pageIndex++) {
+                 List<CellLayout.Cell> pageCells = workspaceCells.get(pageIndex);
+                 for (int positionInPage = 0; positionInPage < pageCells.size(); positionInPage++) {
+                     CellLayout.Cell cell = pageCells.get(positionInPage);
+                     if (cell != null && !cell.getTag().equals("empty")) {
+                         appPositions.add(new SerializableAppPosition(
+                                 cell.getTag(),
+                                 pageIndex,
+                                 positionInPage
+                         ));
+                     }
+                 }
+             }
+
+             // 使用普通Gson对象而不是GsonBuilder
+             SharedPreferences prefs = requireActivity().getSharedPreferences(
+                     "workspace_prefs", Context.MODE_PRIVATE);
+             Gson gson = new Gson(); // 不使用GsonBuilder和注解
+             String json = gson.toJson(appPositions);
+
+             prefs.edit().putString("app_positions", json).apply();
+         } catch (Exception e) {
+             Log.e("WorkspaceFragment", "保存应用位置时出错", e);
+         }
+     }
 
     private View createAppIconView(AppModel app) {
         View view = LayoutInflater.from(getContext()).inflate(R.layout.item_app_icon, null, false);
@@ -244,96 +376,21 @@ import java.util.List;
         @Override
         public Object instantiateItem(@NonNull ViewGroup container, int position) {
             View pageView = LayoutInflater.from(context).inflate(R.layout.item_workspace_page, container, false);
+            pageView.setTag(position); // 标记页面位置
+
             CellLayout cellLayout = pageView.findViewById(R.id.workspace_grid);
             cellLayout.setColumns(COLUMNS);
             cellLayout.setRows(ROWS);
 
+            // 确保此页面的Cell已准备好
+            setupWorkspacePage(position);
+
             List<CellLayout.Cell> pageCells = pages.get(position);
-            for (int i = 0; i < pageCells.size(); i++) {
-                CellLayout.Cell cell = pageCells.get(i);
-                cellLayout.addCell(cell);
-                // 为每个 Cell 设置拖拽监听器
-                if (!cell.getTag().equals("empty")) {
-                    cell.getContentView().setOnLongClickListener(v -> {
-                        ClipData.Item item = new ClipData.Item(cell.getTag());
-                        ClipData dragData = new ClipData(
-                                cell.getTag(),
-                                new String[]{ClipDescription.MIMETYPE_TEXT_PLAIN},
-                                item);
-                        View.DragShadowBuilder shadowBuilder = new View.DragShadowBuilder(v);
-                        v.startDrag(dragData, shadowBuilder, cell, 0); // 将 Cell 作为 local state 传递
-                        v.setVisibility(View.INVISIBLE);
-                        return true;
-                    });
+            for (CellLayout.Cell cell : pageCells) {
+                if (cell.getContentView() != null) {
+                    cellLayout.addCell(cell);
                 }
             }
-
-            // 设置 CellLayout 的拖放监听器
-            cellLayout.setOnDragListener((v, event) -> {
-                CellLayout.Cell draggedCell = (CellLayout.Cell) event.getLocalState();
-                int fromPageIndex = findPageIndexForCell(draggedCell);
-
-                switch (event.getAction()) {
-                    case android.view.DragEvent.ACTION_DRAG_STARTED:
-                        return event.getClipDescription().hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN);
-                    case android.view.DragEvent.ACTION_DRAG_ENTERED:
-                        v.setBackgroundColor(Color.LTGRAY);
-                        break;
-                    case android.view.DragEvent.ACTION_DRAG_EXITED:
-                        v.setBackgroundColor(Color.TRANSPARENT);
-                        break;
-                    case android.view.DragEvent.ACTION_DROP:
-                        float dropX = event.getX();
-                        float dropY = event.getY();
-
-                        CellLayout.Cell targetCell = findCellAtPosition(cellLayout, dropX, dropY);
-                        int toPageIndex = position;
-
-                        if (targetCell != null) {
-                            if (targetCell.getTag().equals("empty")) {
-                                // 目标位置是空的，直接移动
-                                workspaceCells.get(fromPageIndex).remove(draggedCell);
-                                workspaceCells.get(toPageIndex).remove(targetCell);
-                                workspaceCells.get(toPageIndex).add(draggedCell);
-                                // 找到并添加一个空的 Cell 到原来的位置
-                                View emptyView = new View(getContext());
-                                emptyView.setVisibility(View.INVISIBLE);
-                                CellLayout.Cell emptyCell = new CellLayout.Cell("empty", emptyView);
-                                workspaceCells.get(fromPageIndex).add(emptyCell);
-                            } else {
-                                // 目标位置有应用，交换位置
-                                int draggedIndex = workspaceCells.get(fromPageIndex).indexOf(draggedCell);
-                                int targetIndex = workspaceCells.get(toPageIndex).indexOf(targetCell);
-
-                                if (fromPageIndex == toPageIndex) {
-                                    // 同一页内交换
-                                    if (draggedIndex != -1 && targetIndex != -1) {
-                                        Collections.swap(workspaceCells.get(fromPageIndex), draggedIndex, targetIndex);
-                                    }
-                                } else {
-                                    // 不同页之间交换
-                                    workspaceCells.get(fromPageIndex).remove(draggedCell);
-                                    workspaceCells.get(toPageIndex).remove(targetCell);
-                                    workspaceCells.get(fromPageIndex).add(targetIndex, targetCell);
-                                    workspaceCells.get(toPageIndex).add(draggedIndex, draggedCell);
-                                }
-                            }
-
-                            // 更新页面并保存位置
-                            notifyDataSetChanged();
-                            saveAppPositions();
-                        }
-                        break;
-
-                    case android.view.DragEvent.ACTION_DRAG_ENDED:
-                        v.setBackgroundColor(Color.TRANSPARENT);
-                        if (!event.getResult() && draggedCell != null) {
-                            draggedCell.getContentView().post(() -> draggedCell.getContentView().setVisibility(View.VISIBLE));
-                        }
-                        break;
-                }
-                return true;
-            });
 
             container.addView(pageView);
             return pageView;
@@ -380,5 +437,13 @@ import java.util.List;
             // 强制 PagerAdapter 重新加载所有页面
             return POSITION_NONE;
         }
+
+
+
+
+
+
+
     }
+
 }
