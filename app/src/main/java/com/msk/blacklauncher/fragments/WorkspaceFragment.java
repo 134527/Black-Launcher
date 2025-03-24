@@ -1,17 +1,22 @@
 package com.msk.blacklauncher.fragments;
 
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.text.TextUtils;
 import android.util.Log;
+import android.util.Pair;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -23,14 +28,17 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager.widget.PagerAdapter;
 import androidx.viewpager.widget.ViewPager;
+import androidx.viewpager2.widget.ViewPager2;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.Expose;
 import com.google.gson.reflect.TypeToken;
 import com.msk.blacklauncher.R;
+import com.msk.blacklauncher.adapters.WorkspacePagerAdapter;
 import com.msk.blacklauncher.model.AppModel;
 import com.msk.blacklauncher.view.CellLayout;
 
@@ -48,10 +56,13 @@ import java.util.List;
     private static final int COLUMNS = 4;
     private static final int ROWS = 5;
 
-    private ViewPager workspacePager;
+    private ViewPager2 workspacePager;
     private LinearLayout pageIndicator;
     private List<List<CellLayout.Cell>> workspaceCells;
     private PackageManager packageManager;
+     private static final String TAG = "WorkspaceFragment";
+     // 控制标志
+     private volatile boolean isHandlingOverflow = false;
 
      private static class SerializableAppPosition {
          @Expose
@@ -72,60 +83,410 @@ import java.util.List;
          public int getPageIndex() { return pageIndex; }
          public int getPositionInPage() { return positionInPage; }
      }
-    @Nullable
-    @Override
-    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
-        View view = inflater.inflate(R.layout.fragment_workspace, container, false);
-        workspacePager = view.findViewById(R.id.workspace_pager);
-        pageIndicator = view.findViewById(R.id.page_indicator);
-        packageManager = requireActivity().getPackageManager();
 
-        workspaceCells = loadAppPositions();
-        if (workspaceCells.isEmpty()) {
-            workspaceCells = initializeWorkspaceApps();
-        }
+     // 在 onCreate 方法中注册广播接收器
+     @Override
+     public void onCreate(Bundle savedInstanceState) {
+         super.onCreate(savedInstanceState);
 
-        WorkspacePagerAdapter adapter = new WorkspacePagerAdapter(getContext(), workspaceCells);
-        workspacePager.setAdapter(adapter);
-        workspacePager.addOnPageChangeListener(new ViewPager.SimpleOnPageChangeListener() {
-            @Override
-            public void onPageSelected(int position) {
-                updatePageIndicator(position);
-            }
-        });
+         // 注册应用安装/卸载广播接收器
+         IntentFilter filter = new IntentFilter();
+         filter.addAction(Intent.ACTION_PACKAGE_ADDED);
+         filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+         filter.addAction(Intent.ACTION_PACKAGE_REPLACED);
+         filter.addDataScheme("package");
 
-        initPageIndicator();
-        return view;
-    }
-     private void setupWorkspacePage(int pageIndex) {
-         if (pageIndex >= workspaceCells.size()) {
+         requireActivity().registerReceiver(appChangeReceiver, filter);
+     }
+
+     // 在 onDestroy 方法中取消注册
+     @Override
+     public void onDestroy() {
+         super.onDestroy();
+         if (appChangeReceiver != null) {
+             requireActivity().unregisterReceiver(appChangeReceiver);
+         }
+     }
+
+     // 应用变化广播接收器
+     private BroadcastReceiver appChangeReceiver = new BroadcastReceiver() {
+         @Override
+         public void onReceive(Context context, Intent intent) {
+             String action = intent.getAction();
+             if (action == null) return;
+
+             Uri data = intent.getData();
+             if (data == null) return;
+
+             String packageName = data.getSchemeSpecificPart();
+
+             if (Intent.ACTION_PACKAGE_ADDED.equals(action) ||
+                     Intent.ACTION_PACKAGE_REPLACED.equals(action)) {
+                 try {
+                     // 处理新应用安装或应用更新
+                     ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
+                     if (packageManager.getLaunchIntentForPackage(packageName) != null) {
+                         Drawable icon = appInfo.loadIcon(packageManager);
+                         String label = appInfo.loadLabel(packageManager).toString();
+                         AppModel newApp = new AppModel(label, icon, packageName);
+                         addAppToWorkspace(newApp);
+                     }
+                 } catch (PackageManager.NameNotFoundException e) {
+                     Log.e("WorkspaceFragment", "找不到包: " + packageName, e);
+                 }
+             } else if (Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
+                 // 处理应用卸载
+                 removeAppFromWorkspace(packageName);
+             }
+         }
+     };
+     // 添加新的页面
+     private void addNewPage() {
+         List<CellLayout.Cell> newPage = createEmptyPage();
+         workspaceCells.add(newPage);
+
+         // 更新页面指示器
+         initPageIndicator();
+
+         // 通知适配器数据已变化
+         if (workspacePager.getAdapter() != null) {
+             workspacePager.getAdapter().notifyDataSetChanged();
+         }
+     }
+
+     // 获取空闲的单元格位置
+     private Pair<Integer, Integer> findAvailablePosition() {
+         // 首先检查现有页面是否有空位
+         for (int pageIndex = 0; pageIndex < workspaceCells.size(); pageIndex++) {
+             List<CellLayout.Cell> page = workspaceCells.get(pageIndex);
+             for (int position = 0; position < page.size(); position++) {
+                 CellLayout.Cell cell = page.get(position);
+                 if (cell.getTag().equals("empty")) {
+                     return new Pair<>(pageIndex, position);
+                 }
+             }
+         }
+
+         // 如果没有空位，创建新页面并返回首位置
+         addNewPage();
+         return new Pair<>(workspaceCells.size() - 1, 0);
+     }
+
+     // 添加应用到工作区
+     public void addAppToWorkspace(AppModel app) {
+         // 查找可用位置
+         Pair<Integer, Integer> position = findAvailablePosition();
+         int pageIndex = position.first;
+         int positionInPage = position.second;
+
+         // 创建应用图标视图
+         View appView = createAppIconView(app);
+         CellLayout.Cell cell = new CellLayout.Cell(app.getPackageName(), appView);
+
+         // 更新工作区数据
+         workspaceCells.get(pageIndex).set(positionInPage, cell);
+
+         // 如果当前显示的是该页面，立即更新
+         if (workspacePager.getCurrentItem() == pageIndex) {
+             setupWorkspacePage(pageIndex);
+         }
+
+         // 保存新的应用位置
+         saveAppPositions();
+
+         // 通知适配器数据已变化
+         if (workspacePager.getAdapter() != null) {
+             workspacePager.getAdapter().notifyDataSetChanged();
+         }
+     }
+
+     // 从工作区移除应用
+     public void removeAppFromWorkspace(String packageName) {
+         boolean removed = false;
+
+         // 查找并移除应用
+         for (int pageIndex = 0; pageIndex < workspaceCells.size(); pageIndex++) {
+             List<CellLayout.Cell> page = workspaceCells.get(pageIndex);
+             for (int positionInPage = 0; positionInPage < page.size(); positionInPage++) {
+                 CellLayout.Cell cell = page.get(positionInPage);
+                 if (cell.getTag().equals(packageName)) {
+                     // 替换为空单元格
+                     View emptyView = new View(getContext());
+                     emptyView.setVisibility(View.INVISIBLE);
+                     CellLayout.Cell emptyCell = new CellLayout.Cell("empty", emptyView);
+                     page.set(positionInPage, emptyCell);
+                     removed = true;
+                     break;
+                 }
+             }
+             if (removed) break;
+         }
+
+         if (removed) {
+             // 检查是否有空页面可以移除
+             checkAndRemoveEmptyPages();
+
+             // 保存新的应用位置
+             saveAppPositions();
+
+             // 通知适配器数据已变化
+             if (workspacePager.getAdapter() != null) {
+                 workspacePager.getAdapter().notifyDataSetChanged();
+             }
+         }
+     }
+
+     // 检查并移除空页面
+     private void checkAndRemoveEmptyPages() {
+         List<Integer> emptyPageIndices = new ArrayList<>();
+
+         // 找出所有空页面
+         for (int pageIndex = 0; pageIndex < workspaceCells.size(); pageIndex++) {
+             boolean pageIsEmpty = true;
+             List<CellLayout.Cell> page = workspaceCells.get(pageIndex);
+
+             for (CellLayout.Cell cell : page) {
+                 if (!cell.getTag().equals("empty")) {
+                     pageIsEmpty = false;
+                     break;
+                 }
+             }
+
+             if (pageIsEmpty && pageIndex > 0) { // 至少保留一个页面
+                 emptyPageIndices.add(pageIndex);
+             }
+         }
+
+         // 从后向前移除空页面
+         for (int i = emptyPageIndices.size() - 1; i >= 0; i--) {
+             int index = emptyPageIndices.get(i);
+             workspaceCells.remove(index);
+         }
+
+         // 更新页面指示器
+         if (!emptyPageIndices.isEmpty()) {
+             initPageIndicator();
+         }
+     }
+
+
+
+     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
+         View view = inflater.inflate(R.layout.fragment_workspace, container, false);
+
+         // 初始化视图
+         workspacePager = view.findViewById(R.id.workspace_pager);
+         pageIndicator = view.findViewById(R.id.page_indicator);
+         packageManager = requireActivity().getPackageManager();
+
+         // 加载或初始化应用位置
+         workspaceCells = loadAppPositions();
+         if (workspaceCells.isEmpty()) {
+             workspaceCells = initializeWorkspaceApps();
+             saveAppPositions();
+         }
+
+         // 确保至少有一个页面
+         if (workspaceCells.isEmpty()) {
+             workspaceCells.add(createEmptyPage());
+         }
+
+         // 创建适配器
+         final WorkspacePagerAdapter adapter = new WorkspacePagerAdapter(
+                 requireContext(),
+                 workspaceCells,
+                 COLUMNS,
+                 ROWS,
+                 new WorkspacePagerAdapter.OnCellActionListener() {
+                     @Override
+                     public void onCellSwapped(CellLayout.Cell draggingCell, int fromPage, int toPage, int targetColumn, int targetRow) {
+                         // 实现逻辑
+                     }
+
+                     @Override
+                     public void saveAppPositions() {
+                         WorkspaceFragment.this.saveAppPositions();
+                     }
+
+                     @Override
+                     public void setupWorkspacePage(int pageIndex) {
+                         if (pageIndex >= 0 && pageIndex < workspaceCells.size()) {
+                             // ViewPager2不再需要这个方法，在onBindViewHolder中处理
+                         }
+                     }
+
+                     @Override
+                     public boolean onCellOverflow(CellLayout.Cell overflowCell, int pageIndex) {
+                         return WorkspaceFragment.this.handleCellOverflow(overflowCell, pageIndex);
+                     }
+                 }
+         );
+
+         // 初始化页面指示器
+         initPageIndicator();
+
+         // 设置适配器
+         workspacePager.setAdapter(adapter);
+
+         // 注册页面变化监听器
+         workspacePager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+             @Override
+             public void onPageSelected(int position) {
+                 updatePageIndicator(position);
+             }
+         });
+
+         return view;
+     }
+     // 处理单元格溢出
+     private boolean handleCellOverflow(CellLayout.Cell overflowCell, int pageIndex) {
+         Log.d(TAG, "处理溢出单元格: " + (overflowCell != null ? overflowCell.getTag() : "null") + " 页面: " + pageIndex);
+
+         // 防止并发处理
+         synchronized (this) {
+             if (isHandlingOverflow) {
+                 return false;
+             }
+             isHandlingOverflow = true;
+         }
+
+         try {
+             // 检查单元格有效性
+             if (overflowCell == null || overflowCell.getContentView() == null) {
+                 return false;
+             }
+
+             // 创建新页面
+             List<CellLayout.Cell> newPage = createEmptyPage();
+
+             // 放置溢出单元格到新页面第一个位置
+             newPage.set(0, overflowCell);
+
+             // 添加新页面
+             workspaceCells.add(newPage);
+
+             // 在UI线程更新视图 - 但使用post确保布局完成后执行
+             if (isAdded() && !isDetached()) {
+                 new Handler().post(() -> {
+                     if (isAdded() && !isDetached()) {
+                         try {
+                             // 更新页面指示器
+                             initPageIndicator();
+
+                             // 使用post确保通知发生在下一个布局周期
+                             workspacePager.post(() -> {
+                                 if (workspacePager != null && workspacePager.getAdapter() != null) {
+                                     workspacePager.getAdapter().notifyDataSetChanged();
+                                 }
+
+                                 // 保存应用位置
+                                 saveAppPositions();
+
+                                 // 延迟切换到新页面
+                                 new Handler().postDelayed(() -> {
+                                     if (isAdded() && !isDetached() && workspacePager != null) {
+                                         int lastPage = workspaceCells.size() - 1;
+                                         workspacePager.setCurrentItem(lastPage, true);
+                                     }
+                                 }, 200);
+                             });
+                         } catch (Exception e) {
+                             Log.e(TAG, "更新UI时出错", e);
+                         }
+                     }
+                 });
+             }
+
+             return true;
+         } finally {
+             isHandlingOverflow = false;
+         }
+     }
+
+     // 初始化页面指示器
+     private void initPageIndicator() {
+         if (pageIndicator != null) {
+             pageIndicator.removeAllViews();
+             int pageCount = workspaceCells.size();
+
+             for (int i = 0; i < pageCount; i++) {
+                 View dot = new View(requireContext());
+                 LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                         (int) getResources().getDimension(R.dimen.dot_size),
+                         (int) getResources().getDimension(R.dimen.dot_size)
+                 );
+                 params.setMargins(8, 0, 8, 0);
+                 dot.setLayoutParams(params);
+                 dot.setBackgroundResource(R.drawable.dot_indicator);
+                 pageIndicator.addView(dot);
+             }
+
+             // 更新当前页面指示器
+             if (workspacePager != null) {
+                 updatePageIndicator(workspacePager.getCurrentItem());
+             }
+         }
+     }
+
+     // 更新页面指示器状态
+     private void updatePageIndicator(int position) {
+         if (pageIndicator != null) {
+             for (int i = 0; i < pageIndicator.getChildCount(); i++) {
+                 View dot = pageIndicator.getChildAt(i);
+                 dot.setSelected(i == position);
+             }
+         }
+     }
+
+     // 设置所有工作区页面
+     private void setupAllWorkspacePages() {
+         for (int i = 0; i < workspaceCells.size(); i++) {
+             setupWorkspacePage(i);
+         }
+     }
+
+     private void setupWorkspacePage(int pageIndex)  {
+         if (pageIndex < 0 || pageIndex >= workspaceCells.size()) {
+             Log.e("WorkspaceFragment", "Invalid page index: " + pageIndex);
              return;
          }
 
-         List<CellLayout.Cell> pageCells = workspaceCells.get(pageIndex);
-         for (int i = 0; i < pageCells.size(); i++) {
-             CellLayout.Cell cell = pageCells.get(i);
-
-             // 检查contentView是否为空，为空则创建
-             if (cell.getContentView() == null) {
-                 if (!cell.getTag().equals("empty")) {
-                     try {
-                         ApplicationInfo appInfo = packageManager.getApplicationInfo(cell.getTag(), 0);
-                         Drawable icon = appInfo.loadIcon(packageManager);
-                         String label = appInfo.loadLabel(packageManager).toString();
-
-                         // 创建应用图标视图
-                         View appView = createAppIconView(new AppModel(label, icon, cell.getTag()));
-                         cell.setContentView(appView);
-                     } catch (Exception e) {
-                         Log.e("WorkspaceFragment", "创建应用图标失败: " + e.getMessage());
-                     }
-                 } else {
-                     // 创建空白视图
-                     View emptyView = new View(getContext());
-                     emptyView.setVisibility(View.INVISIBLE);
-                     cell.setContentView(emptyView);
+         // 获取页面视图
+         View pageView = null;
+         RecyclerView.Adapter adapter = workspacePager.getAdapter();
+         if (adapter != null && adapter instanceof WorkspacePagerAdapter) {
+             // 找到当前页面视图
+             for (int i = 0; i < workspacePager.getChildCount(); i++) {
+                 View child = workspacePager.getChildAt(i);
+                 if (child.getTag() != null && child.getTag().equals("page_" + pageIndex)) {
+                     pageView = child;
+                     break;
                  }
+             }
+         }
+
+         if (pageView == null) {
+             Log.d("WorkspaceFragment", "Page view not found for index: " + pageIndex);
+             return;
+         }
+
+         CellLayout cellLayout = pageView.findViewById(R.id.workspace_grid);
+         if (cellLayout == null) {
+             Log.e("WorkspaceFragment", "CellLayout not found in page view");
+             return;
+         }
+
+         // 清空现有内容
+         cellLayout.removeAllViews();
+
+         // 添加应用图标
+         List<CellLayout.Cell> pageCells = workspaceCells.get(pageIndex);
+         for (CellLayout.Cell cell : pageCells) {
+             if (cell != null && !cell.getTag().equals("empty") && cell.getContentView() != null) {
+                 // 重置Cell的期望位置，让CellLayout重新计算
+                 cell.setExpectColumnIndex(-1);
+                 cell.setExpectRowIndex(-1);
+                 cellLayout.addCell(cell);
              }
          }
      }
@@ -145,7 +506,7 @@ import java.util.List;
 
          // 计算需要的页数
          int appsPerPage = COLUMNS * ROWS;
-         int totalPages = (int) Math.ceil(allApps.size() / (float) appsPerPage);
+         int totalPages = Math.max(1, (int) Math.ceil(allApps.size() / (float) appsPerPage));
 
          // 为每一页创建 CellLayout
          for (int i = 0; i < totalPages; i++) {
@@ -153,6 +514,7 @@ import java.util.List;
              int startIndex = i * appsPerPage;
              int endIndex = Math.min((i + 1) * appsPerPage, allApps.size());
 
+             // 添加当前页面的应用图标
              for (int j = startIndex; j < endIndex; j++) {
                  AppModel app = allApps.get(j);
                  View appIconView = createAppIconView(app);
@@ -174,28 +536,7 @@ import java.util.List;
          return pages;
      }
 
-     // 更新页面指示器，使其动态适应页面数量
-     private void initPageIndicator() {
-         pageIndicator.removeAllViews();
-         for (int i = 0; i < workspaceCells.size(); i++) {
-             View indicator = new View(getContext());
-             int size = (int) getResources().getDimension(R.dimen.page_indicator_size);
-             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
-             int margin = (int) getResources().getDimension(R.dimen.page_indicator_margin);
-             params.setMargins(margin, 0, margin, 0);
-             indicator.setLayoutParams(params);
-             indicator.setBackgroundResource(R.drawable.page_indicator);
-             pageIndicator.addView(indicator);
-         }
-         updatePageIndicator(0);
-     }
 
-     private void updatePageIndicator(int currentPage) {
-         for (int i = 0; i < pageIndicator.getChildCount(); i++) {
-             View indicator = pageIndicator.getChildAt(i);
-             indicator.setSelected(i == currentPage);
-         }
-     }
 
 private List<List<CellLayout.Cell>> loadAppPositions() {
          List<List<CellLayout.Cell>> result = new ArrayList<>();
@@ -360,90 +701,10 @@ private List<List<CellLayout.Cell>> loadAppPositions() {
             });
         }
 
+
         return view;
     }
 
-    private class WorkspacePagerAdapter extends PagerAdapter {
-        private Context context;
-        private List<List<CellLayout.Cell>> pages;
 
-        public WorkspacePagerAdapter(Context context, List<List<CellLayout.Cell>> pages) {
-            this.context = context;
-            this.pages = pages;
-        }
-
-        @NonNull
-        @Override
-        public Object instantiateItem(@NonNull ViewGroup container, int position) {
-            View pageView = LayoutInflater.from(context).inflate(R.layout.item_workspace_page, container, false);
-            pageView.setTag(position); // 标记页面位置
-
-            CellLayout cellLayout = pageView.findViewById(R.id.workspace_grid);
-            cellLayout.setColumns(COLUMNS);
-            cellLayout.setRows(ROWS);
-
-            // 确保此页面的Cell已准备好
-            setupWorkspacePage(position);
-
-            List<CellLayout.Cell> pageCells = pages.get(position);
-            for (CellLayout.Cell cell : pageCells) {
-                if (cell.getContentView() != null) {
-                    cellLayout.addCell(cell);
-                }
-            }
-
-            container.addView(pageView);
-            return pageView;
-        }
-
-        private int findPageIndexForCell(CellLayout.Cell cell) {
-            for (int i = 0; i < workspaceCells.size(); i++) {
-                if (workspaceCells.get(i).contains(cell)) {
-                    return i;
-                }
-            }
-            return -1;
-        }
-
-        private CellLayout.Cell findCellAtPosition(CellLayout cellLayout, float x, float y) {
-            for (List<CellLayout.Cell> page : workspaceCells) {
-                for (CellLayout.Cell cell : page) {
-                    View view = cell.getContentView();
-                    if (view.getLeft() <= x && x <= view.getRight() && view.getTop() <= y && y <= view.getBottom()) {
-                        return cell;
-                    }
-                }
-            }
-            return null;
-        }
-
-        @Override
-        public int getCount() {
-            return pages.size();
-        }
-
-        @Override
-        public boolean isViewFromObject(@NonNull View view, @NonNull Object object) {
-            return view == object;
-        }
-
-        @Override
-        public void destroyItem(@NonNull ViewGroup container, int position, @NonNull Object object) {
-            container.removeView((View) object);
-        }
-
-        @Override
-        public int getItemPosition(Object object) {
-            // 强制 PagerAdapter 重新加载所有页面
-            return POSITION_NONE;
-        }
-
-
-
-
-
-
-
-    }
 
 }

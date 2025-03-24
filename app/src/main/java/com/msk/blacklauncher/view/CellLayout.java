@@ -14,6 +14,7 @@ import android.view.ViewGroup;
 import android.view.ViewParent;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Description
@@ -101,50 +102,119 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
 
     @Override
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
-        int nowL, nowT, locateX, locateY;
-        int cellWidth, cellHeight;
+        // 计算单元格尺寸
+        per_cell_width = (r - l) / columns;
+        per_cell_height = (b - t) / rows;
+
+        // 清空现有占位信息
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < columns; j++) {
+                cellHolds[i][j] = false;
+            }
+        }
+
+        // 整理需要移除的单元格
         needRemoveCells.clear();
-        for (Cell cell : cells) {
+
+        // 排序单元格 - 优先处理已有位置的单元格
+        List<Cell> orderedCells = new ArrayList<>(cells);
+        orderedCells.sort((c1, c2) -> {
+            boolean hasPos1 = c1.getExpectColumnIndex() >= 0 && c1.getExpectRowIndex() >= 0;
+            boolean hasPos2 = c2.getExpectColumnIndex() >= 0 && c2.getExpectRowIndex() >= 0;
+            return hasPos1 == hasPos2 ? 0 : (hasPos1 ? -1 : 1);
+        });
+
+        // 逐个布局单元格
+        for (Cell cell : orderedCells) {
+            if (cell == null || cell.getContentView() == null) {
+                needRemoveCells.add(cell);
+                continue;
+            }
+
+            // 确定单元格位置
+            int locateX, locateY;
+
             if (cell.getExpectColumnIndex() >= 0 && cell.getExpectRowIndex() >= 0) {
-                locateX = cell.getExpectColumnIndex();
-                locateY = cell.getExpectRowIndex();
+                // 使用期望位置
+                locateX = Math.min(cell.getExpectColumnIndex(), columns - 1);
+                locateY = Math.min(cell.getExpectRowIndex(), rows - 1);
+
+                // 检查位置是否可用
+                if (!checkIsEnough(cellHolds, locateX, locateY, cell.getWidthNum(), cell.getHeightNum())) {
+                    // 尝试找新位置
+                    Point p = findLeftAndTop(cell);
+                    if (p.x == -1 || p.y == -1) {
+                        // 处理溢出
+                        if (cellOverflowListener != null && cellOverflowListener.onCellOverflow(cell)) {
+                            needRemoveCells.add(cell);
+                            continue;
+                        } else {
+                            // 作为备用方案，尽量放在左上角
+                            locateX = 0;
+                            locateY = 0;
+                        }
+                    } else {
+                        locateX = p.x;
+                        locateY = p.y;
+                        // 更新期望位置
+                        cell.setExpectColumnIndex(locateX);
+                        cell.setExpectRowIndex(locateY);
+                    }
+                }
             } else {
+                // 查找新位置
                 Point p = findLeftAndTop(cell);
-                cell.setExpectRowIndex(p.x);
-                cell.setExpectColumnIndex(p.y);
-                locateX = cell.getExpectColumnIndex();
-                locateY = cell.getExpectRowIndex();
                 if (p.x == -1 || p.y == -1) {
-                    Log.e("CellLayout", "onLayout: child is to large or to much children");
-                    needRemoveCells.add(cell);
-                    continue;
+                    // 报告溢出
+                    if (cellOverflowListener != null && cellOverflowListener.onCellOverflow(cell)) {
+                        needRemoveCells.add(cell);
+                        continue;
+                    } else {
+                        // 备用方案
+                        locateX = 0;
+                        locateY = 0;
+                    }
+                } else {
+                    locateX = p.x;
+                    locateY = p.y;
+                    // 设置期望位置
+                    cell.setExpectColumnIndex(locateX);
+                    cell.setExpectRowIndex(locateY);
                 }
             }
-            nowL = locateX * per_cell_width;
-            nowT = locateY * per_cell_height;
-            cellWidth = cell.getWidthNum() * per_cell_width;
-            cellHeight = cell.getHeightNum() * per_cell_height;
-            //修改cell的layoutparam的大小，不然会导致cell的view中的gravity失效
-            cell.getContentView().getLayoutParams().width = cellWidth;
-            cell.getContentView().getLayoutParams().height = cellHeight;
-            cell.getContentView().layout(nowL, nowT, nowL + cellWidth, nowT + cellHeight);
-        }
-        for (Cell needRemoveCell : needRemoveCells) {
-            removeView(needRemoveCell.getContentView());
-        }
-        cells.removeAll(needRemoveCells);
-//        Log.d("CellLayout", "onLayout: ==============================");
-//        for (boolean[] cellHold : cellHolds) {
-//            StringBuilder builder = new StringBuilder();
-//            for (boolean b1 : cellHold) {
-//                builder.append(b1 + " ");
-//            }
-//            Log.d("CellLayout", "onLayout: " + builder.toString());
-//        }
-//        Log.d("CellLayout", "onLayout: ==============================");
-    }
 
-    //查找足够空间放置cell
+            // 标记位置为已占用
+            fillCellLayout(locateX, locateY, cell.getWidthNum(), cell.getHeightNum());
+
+            // 计算实际布局位置和尺寸
+            int nowL = locateX * per_cell_width;
+            int nowT = locateY * per_cell_height;
+            int cellWidth = Math.min(cell.getWidthNum() * per_cell_width, getWidth() - nowL);
+            int cellHeight = Math.min(cell.getHeightNum() * per_cell_height, getHeight() - nowT);
+
+            // 设置视图大小和位置
+            View contentView = cell.getContentView();
+            ViewGroup.LayoutParams params = contentView.getLayoutParams();
+            if (params == null) {
+                params = new ViewGroup.LayoutParams(cellWidth, cellHeight);
+                contentView.setLayoutParams(params);
+            } else {
+                params.width = cellWidth;
+                params.height = cellHeight;
+            }
+
+            // 布局视图
+            contentView.layout(nowL, nowT, nowL + cellWidth, nowT + cellHeight);
+        }
+
+        // 移除需要移除的单元格
+        for (Cell cell : needRemoveCells) {
+            if (cell != null && cell.getContentView() != null) {
+                removeView(cell.getContentView());
+            }
+            cells.remove(cell);
+        }
+    }
     private Point findLeftAndTop(Cell cell) {
         Point result = new Point(-1, -1);
         boolean isEnough;
@@ -234,9 +304,32 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     }
                 }
                 break;
+            case DragEvent.ACTION_DRAG_LOCATION:
+                // 计算当前悬停位置
+                int col = (int) (event.getX() / per_cell_width);
+                int row = (int) (event.getY() / per_cell_height);
+
+                // 防止越界
+                col = Math.max(0, Math.min(col, columns - 1));
+                row = Math.max(0, Math.min(row, rows - 1));
+
+                // 更新高亮区域
+                if (col != highLightColumn || row != highLightRow) {
+                    highLightColumn = col;
+                    highLightRow = row;
+
+                    // 检查位置是否有效
+                    highLightValid = checkIsEnough(cellHolds, col, row, cell.getWidthNum(), cell.getHeightNum());
+                    invalidate();
+                }
+                break;
 
             case DragEvent.ACTION_DROP:
-                // 计算目标位置
+                // 确保拖拽中的视图不为null
+                if (cell.getContentView() == null) {
+                    return false;
+                }
+
                 int targetCol = (int) (event.getX() / per_cell_width);
                 int targetRow = (int) (event.getY() / per_cell_height);
 
@@ -426,5 +519,21 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         // 重新布局
         requestLayout();
     }
+    // 添加一个监听器接口，当没有空间放置应用图标时调用
+    public interface OnCellOverflowListener {
+        /**
+         * 当 CellLayout 无法为 Cell 找到足够空间时调用
+         * @param overflowCell 无法放置的Cell
+         * @return 如果返回true，表示已处理溢出；如果返回false，CellLayout将移除此Cell
+         */
+        boolean onCellOverflow(Cell overflowCell);
+    }
+
+    private OnCellOverflowListener cellOverflowListener;
+
+    public void setOnCellOverflowListener(OnCellOverflowListener listener) {
+        this.cellOverflowListener = listener;
+    }
+
 
 }
