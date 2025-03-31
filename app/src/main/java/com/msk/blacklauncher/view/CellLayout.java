@@ -1,6 +1,8 @@
 package com.msk.blacklauncher.view;
 
 
+import android.content.ClipData;
+import android.content.ClipDescription;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -22,6 +24,7 @@ import java.util.List;
  */
 public class CellLayout extends ViewGroup implements View.OnDragListener {
 
+    private static final String TAG = "CellLayout";
     private int columns = 6;
     private int rows = 4;
     private int per_cell_width;
@@ -51,15 +54,111 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         setWillNotDraw(false);
     }
 
+    // 在 CellLayout 中添加设置单元格可拖拽的方法
+    private void setupCellForDrag(Cell cell)  {
+        if (cell == null || cell.getContentView() == null) return;
+
+        View contentView = cell.getContentView();
+
+        // 设置长按启动拖拽
+        contentView.setOnLongClickListener(v -> {
+            // 空单元格不能拖拽
+            if ("empty".equals(cell.getTag())) {
+                return false;
+            }
+
+            ClipData dragData = new ClipData(
+                    cell.getTag(),
+                    new String[] { ClipDescription.MIMETYPE_TEXT_PLAIN },
+                    new ClipData.Item(cell.getTag())
+            );
+
+            View.DragShadowBuilder shadowBuilder = new View.DragShadowBuilder(contentView);
+
+            // 开始拖拽操作
+            contentView.startDragAndDrop(
+                    dragData,
+                    shadowBuilder,
+                    cell, // 传递Cell对象作为本地状态
+                    0
+            );
+
+            // 这里不设置Alpha值，以避免问题
+            // contentView.setAlpha(0.5f);
+
+            return true;
+        });
+
+        // 移除这个监听器以避免冲突
+    /*
+    contentView.setOnDragListener((v, event) -> {
+        if (event.getAction() == DragEvent.ACTION_DRAG_ENDED) {
+            contentView.setAlpha(1.0f);
+        }
+        return false;
+    });
+    */
+    }
+
+    @Override
+    protected void onDraw(Canvas canvas) {
+        super.onDraw(canvas);
+
+        // 如果有高亮单元格，绘制高亮效果
+        if (highLightValid && highLightColumn >= 0 && highLightRow >= 0) {
+            Paint paint = new Paint();
+            paint.setColor(Color.argb(80, 0, 150, 255)); // 半透明蓝色
+            paint.setStyle(Paint.Style.FILL);
+
+            float left = highLightColumn * per_cell_width;
+            float top = highLightRow * per_cell_height;
+            float right = left + per_cell_width;
+            float bottom = top + per_cell_height;
+
+            canvas.drawRect(left, top, right, bottom, paint);
+
+            // 添加边框
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setColor(Color.rgb(0, 120, 215));
+            paint.setStrokeWidth(2);
+            canvas.drawRect(left, top, right, bottom, paint);
+        }
+    }
 
     public void addCell(Cell cell) {
+        if (cell == null) {
+            Log.e(TAG, "尝试添加空单元格");
+            return;
+        }
+
+        // 记录单元格
         cells.add(cell);
-        if (getMeasuredWidth() > 0 && getMeasuredHeight() > 0) {
-            //如果界面已经显示了，那么立刻进行一次位置计算
-            initCell(cell);
-            Point p = findLeftAndTop(cell);
-            cell.setExpectRowIndex(p.x);
-            cell.setExpectColumnIndex(p.y);
+
+        // 对非空单元格，添加视图并设置拖拽
+        if (cell.getContentView() != null) {
+            View contentView = cell.getContentView();
+
+            // 从父视图中移除(如果有)
+            if (contentView.getParent() != null) {
+                ((ViewGroup)contentView.getParent()).removeView(contentView);
+            }
+
+            // 设置视图可见性
+            boolean isEmpty = "empty".equals(cell.getTag());
+            contentView.setVisibility(isEmpty ? View.INVISIBLE : View.VISIBLE);
+
+            // 设置布局参数
+            contentView.setLayoutParams(new LayoutParams(
+                    per_cell_width, per_cell_height
+            ));
+
+            // 添加到布局
+            addView(contentView);
+
+            // 只为非空单元格设置拖拽
+            if (!isEmpty) {
+                setupCellForDrag(cell);
+            }
         }
     }
 
@@ -100,119 +199,52 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         cell.setHeightNum(childExpectCellHeightNum);
     }
 
-    @Override
-    protected void onLayout(boolean changed, int l, int t, int r, int b) {
+     @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        int width = right - left;
+        int height = bottom - top;
+
         // 计算单元格尺寸
-        per_cell_width = (r - l) / columns;
-        per_cell_height = (b - t) / rows;
+        per_cell_width = width / columns;
+        per_cell_height = height / rows;
 
-        // 清空现有占位信息
-        for (int i = 0; i < rows; i++) {
-            for (int j = 0; j < columns; j++) {
-                cellHolds[i][j] = false;
-            }
+        Log.d("CellLayout", "计算单元格尺寸: 宽度=" + per_cell_width + ", 高度=" + per_cell_height);
+
+        // 检测尺寸是否合理
+        if (per_cell_width <= 0 || per_cell_height <= 0) {
+            Log.e("CellLayout", "单元格尺寸计算错误，使用默认值");
+            per_cell_width = Math.max(100, width / columns);
+            per_cell_height = Math.max(100, height / rows);
         }
 
-        // 整理需要移除的单元格
-        needRemoveCells.clear();
+        // 布局子视图
+        int childCount = getChildCount();
+        for (int i = 0; i < childCount; i++) {
+            View child = getChildAt(i);
 
-        // 排序单元格 - 优先处理已有位置的单元格
-        List<Cell> orderedCells = new ArrayList<>(cells);
-        orderedCells.sort((c1, c2) -> {
-            boolean hasPos1 = c1.getExpectColumnIndex() >= 0 && c1.getExpectRowIndex() >= 0;
-            boolean hasPos2 = c2.getExpectColumnIndex() >= 0 && c2.getExpectRowIndex() >= 0;
-            return hasPos1 == hasPos2 ? 0 : (hasPos1 ? -1 : 1);
-        });
-
-        // 逐个布局单元格
-        for (Cell cell : orderedCells) {
-            if (cell == null || cell.getContentView() == null) {
-                needRemoveCells.add(cell);
-                continue;
-            }
-
-            // 确定单元格位置
-            int locateX, locateY;
-
-            if (cell.getExpectColumnIndex() >= 0 && cell.getExpectRowIndex() >= 0) {
-                // 使用期望位置
-                locateX = Math.min(cell.getExpectColumnIndex(), columns - 1);
-                locateY = Math.min(cell.getExpectRowIndex(), rows - 1);
-
-                // 检查位置是否可用
-                if (!checkIsEnough(cellHolds, locateX, locateY, cell.getWidthNum(), cell.getHeightNum())) {
-                    // 尝试找新位置
-                    Point p = findLeftAndTop(cell);
-                    if (p.x == -1 || p.y == -1) {
-                        // 处理溢出
-                        if (cellOverflowListener != null && cellOverflowListener.onCellOverflow(cell)) {
-                            needRemoveCells.add(cell);
-                            continue;
-                        } else {
-                            // 作为备用方案，尽量放在左上角
-                            locateX = 0;
-                            locateY = 0;
-                        }
-                    } else {
-                        locateX = p.x;
-                        locateY = p.y;
-                        // 更新期望位置
-                        cell.setExpectColumnIndex(locateX);
-                        cell.setExpectRowIndex(locateY);
-                    }
-                }
-            } else {
-                // 查找新位置
-                Point p = findLeftAndTop(cell);
-                if (p.x == -1 || p.y == -1) {
-                    // 报告溢出
-                    if (cellOverflowListener != null && cellOverflowListener.onCellOverflow(cell)) {
-                        needRemoveCells.add(cell);
-                        continue;
-                    } else {
-                        // 备用方案
-                        locateX = 0;
-                        locateY = 0;
-                    }
-                } else {
-                    locateX = p.x;
-                    locateY = p.y;
-                    // 设置期望位置
-                    cell.setExpectColumnIndex(locateX);
-                    cell.setExpectRowIndex(locateY);
+            // 获取单元格位置
+            int cellIndex = -1;
+            for (int j = 0; j < cells.size(); j++) {
+                if (cells.get(j) != null && cells.get(j).getContentView() == child) {
+                    cellIndex = j;
+                    break;
                 }
             }
 
-            // 标记位置为已占用
-            fillCellLayout(locateX, locateY, cell.getWidthNum(), cell.getHeightNum());
+            if (cellIndex != -1) {
+                // 计算行列位置
+                int row = cellIndex / columns;
+                int col = cellIndex % columns;
 
-            // 计算实际布局位置和尺寸
-            int nowL = locateX * per_cell_width;
-            int nowT = locateY * per_cell_height;
-            int cellWidth = Math.min(cell.getWidthNum() * per_cell_width, getWidth() - nowL);
-            int cellHeight = Math.min(cell.getHeightNum() * per_cell_height, getHeight() - nowT);
+                // 计算实际位置
+                int cellLeft = col * per_cell_width;
+                int cellTop = row * per_cell_height;
+                int cellRight = cellLeft + per_cell_width;
+                int cellBottom = cellTop + per_cell_height;
 
-            // 设置视图大小和位置
-            View contentView = cell.getContentView();
-            ViewGroup.LayoutParams params = contentView.getLayoutParams();
-            if (params == null) {
-                params = new ViewGroup.LayoutParams(cellWidth, cellHeight);
-                contentView.setLayoutParams(params);
-            } else {
-                params.width = cellWidth;
-                params.height = cellHeight;
+                // 布局子视图
+                child.layout(cellLeft, cellTop, cellRight, cellBottom);
             }
-
-            // 布局视图
-            contentView.layout(nowL, nowT, nowL + cellWidth, nowT + cellHeight);
-        }
-
-        // 移除需要移除的单元格
-        for (Cell cell : needRemoveCells) {
-            if (cell != null && cell.getContentView() != null) {
-                removeView(cell.getContentView());
-            }
-            cells.remove(cell);
         }
     }
     private Point findLeftAndTop(Cell cell) {
@@ -279,117 +311,240 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
     private boolean[][] tempCellHolds;
 
 
-   @Override
+    @Override
     public boolean onDrag(View v, DragEvent event) {
-        Cell cell = (Cell) event.getLocalState();
-        if (cell == null) return false;
+        // 获取拖拽的单元格索引
+        int dragCellIndex = -1;
+        Cell dragCell = null;
+
+        if (event.getLocalState() != null && event.getLocalState() instanceof Cell) {
+            dragCell = (Cell) event.getLocalState();
+            String dragTag = dragCell.getTag();
+
+            // 查找拖动的单元格在当前页的索引
+            for (int i = 0; i < cells.size(); i++) {
+                Cell currentCell = cells.get(i);
+                if (currentCell != null && currentCell.getTag() != null &&
+                        currentCell.getTag().equals(dragTag)) {
+                    dragCellIndex = i;
+                    break;
+                }
+            }
+        }
 
         switch (event.getAction()) {
             case DragEvent.ACTION_DRAG_STARTED:
-                // 深拷贝当前布局状态
-                tempCellHolds = new boolean[rows][];
-                for (int i = 0; i < rows; i++) {
-                    tempCellHolds[i] = cellHolds[i].clone();
-                }
-                // 清空拖动 Cell 原位置
-                if (cell.getExpectColumnIndex() >= 0 && cell.getExpectRowIndex() >= 0) {
-                    for (int i = cell.getExpectColumnIndex();
-                         i < cell.getExpectColumnIndex() + cell.getWidthNum(); i++) {
-                        for (int j = cell.getExpectRowIndex();
-                             j < cell.getExpectRowIndex() + cell.getHeightNum(); j++) {
-                            if (j < rows && i < columns) {
-                                tempCellHolds[j][i] = false;
-                            }
-                        }
-                    }
-                }
-                break;
+                return true;
+
+            case DragEvent.ACTION_DRAG_ENTERED:
+                return true;
+
             case DragEvent.ACTION_DRAG_LOCATION:
-                // 计算当前悬停位置
-                int col = (int) (event.getX() / per_cell_width);
-                int row = (int) (event.getY() / per_cell_height);
+                // 计算当前悬停位置对应的单元格
+                int column = Math.min(columns - 1, Math.max(0, (int)(event.getX() / per_cell_width)));
+                int row = Math.min(rows - 1, Math.max(0, (int)(event.getY() / per_cell_height)));
 
-                // 防止越界
-                col = Math.max(0, Math.min(col, columns - 1));
-                row = Math.max(0, Math.min(row, rows - 1));
+                highLightColumn = column;
+                highLightRow = row;
+                highLightValid = true;  // 设置为可放置
+                invalidate();
+                return true;
 
-                // 更新高亮区域
-                if (col != highLightColumn || row != highLightRow) {
-                    highLightColumn = col;
-                    highLightRow = row;
-
-                    // 检查位置是否有效
-                    highLightValid = checkIsEnough(cellHolds, col, row, cell.getWidthNum(), cell.getHeightNum());
-                    invalidate();
-                }
-                break;
+            case DragEvent.ACTION_DRAG_EXITED:
+                highLightValid = false;
+                invalidate();
+                return true;
 
             case DragEvent.ACTION_DROP:
-                // 确保拖拽中的视图不为null
-                if (cell.getContentView() == null) {
+                if (dragCellIndex < 0) {
+                    Log.e(TAG, "拖拽索引无效: " + dragCellIndex);
+                    highLightColumn = -1;
+                    highLightRow = -1;
+                    highLightValid = false;
+                    invalidate();
                     return false;
                 }
 
-                int targetCol = (int) (event.getX() / per_cell_width);
-                int targetRow = (int) (event.getY() / per_cell_height);
+                // 计算目标位置
+                int targetColumn = Math.min(columns - 1, Math.max(0, (int)(event.getX() / per_cell_width)));
+                int targetRow = Math.min(rows - 1, Math.max(0, (int)(event.getY() / per_cell_height)));
+                int targetIndex = targetRow * columns + targetColumn;
 
-                // 确保目标位置在边界内
-                targetCol = Math.max(0, Math.min(targetCol, columns - cell.getWidthNum()));
-                targetRow = Math.max(0, Math.min(targetRow, rows - cell.getHeightNum()));
+                // 确保目标索引有效
+                if (targetIndex >= 0 && targetIndex < cells.size()) {
+                    Cell targetCell = cells.get(targetIndex);
 
-                // 使用交换方法处理放置
-                swapCells(cell, targetCol, targetRow);
-                cell.getContentView().setVisibility(View.VISIBLE);
+                    // 判断目标单元格类型并采用不同处理方式
+                    if (targetCell.getTag().equals("empty")) {
+                        // 空白单元格 - 直接交换位置
+                        swapCells(dragCellIndex, targetIndex);
+                        Log.d(TAG, "将应用图标与空白单元格交换: " + dragCellIndex + " <-> " + targetIndex);
+                    } else {
+                        // 非空单元格 - 插入并移动
+                        moveCells(dragCellIndex, targetIndex);
+                        Log.d(TAG, "将应用图标移动至非空单元格: " + dragCellIndex + " -> " + targetIndex);
+                    }
+                }
 
-                // 清除高亮
+                // 恢复被拖动单元格的视觉状态
+                if (dragCell != null && dragCell.getContentView() != null) {
+                    dragCell.getContentView().setAlpha(1.0f);
+                    dragCell.getContentView().setVisibility(View.VISIBLE);
+                }
+
+                // 重置高亮状态
                 highLightColumn = -1;
                 highLightRow = -1;
+                highLightValid = false;
                 invalidate();
-                break;
+                return true;
 
             case DragEvent.ACTION_DRAG_ENDED:
-                if (!event.getResult()) {
-                    // 拖拽取消，恢复原状态
-                    cell.getContentView().setVisibility(View.VISIBLE);
+                // 确保被拖动的单元格恢复正常
+                if (dragCell != null && dragCell.getContentView() != null) {
+                    dragCell.getContentView().setAlpha(1.0f);
+                    dragCell.getContentView().setVisibility(View.VISIBLE);
                 }
-                // 清除高亮
+
+                // 重置高亮状态
                 highLightColumn = -1;
                 highLightRow = -1;
+                highLightValid = false;
                 invalidate();
-                break;
+                return true;
         }
-        return true;
+
+        return false;
     }
 
-    // 添加安全清除原位置的方法
-    private void clearOriginalPosition(Cell cell) {
-        int startX = cell.getExpectColumnIndex();
-        int startY = cell.getExpectRowIndex();
-        int width = cell.getWidthNum();
-        int height = cell.getHeightNum();
+    private void resetHighlight() {
+        highLightColumn = -1;
+        highLightRow = -1;
+        highLightValid = false;
+        invalidate();
+    }
 
-        // 检查位置是否有效
-        if (startX < 0 || startY < 0 || startX + width > columns || startY + height > rows) {
+
+    private void moveCells(int sourceIndex, int targetIndex) {
+        // 确保索引有效
+        if (sourceIndex < 0 || sourceIndex >= cells.size() ||
+                targetIndex < 0 || targetIndex >= cells.size()) {
+            Log.e(TAG, "无效的单元格索引: 源=" + sourceIndex + ", 目标=" + targetIndex);
             return;
         }
 
-        // 清空原位置
-        for (int i = startX; i < startX + width; i++) {
-            for (int j = startY; j < startY + height; j++) {
-                tempCellHolds[j][i] = false;
-            }
+        if (sourceIndex == targetIndex) {
+            return; // 相同位置不需要移动
         }
+
+        // 获取源单元格和目标单元格
+        Cell sourceCell = cells.get(sourceIndex);
+        Cell targetCell = cells.get(targetIndex);
+
+        Log.d(TAG, "移动单元格: 从" + sourceIndex + "到" + targetIndex +
+                ", 源Tag=" + sourceCell.getTag() + ", 目标Tag=" + targetCell.getTag());
+
+        // 特别处理目标单元格为空的情况
+        if (targetCell.getTag().equals("empty")) {
+            // 直接交换源单元格和目标单元格
+            cells.set(sourceIndex, targetCell);  // 源位置设为空
+            cells.set(targetIndex, sourceCell);  // 目标位置设为源单元格
+
+            // 确保视图状态正确
+            if (sourceCell.getContentView() != null) {
+                sourceCell.getContentView().setVisibility(View.VISIBLE);
+                sourceCell.getContentView().setAlpha(1.0f);
+            }
+
+            // 重新布局
+            requestLayout();
+            return;
+        }
+
+        // 以下是非空目标单元格的处理逻辑，保持原有实现
+        // 创建临时数组保存当前状态
+        ArrayList<Cell> tempCells = new ArrayList<>(cells);
+
+        if (targetIndex > sourceIndex) {
+            // 向后移动: 目标位置比源位置大
+            for (int i = sourceIndex; i < targetIndex; i++) {
+                cells.set(i, tempCells.get(i + 1));
+            }
+            cells.set(targetIndex, sourceCell);
+        } else {
+            // 向前移动: 目标位置比源位置小
+            for (int i = sourceIndex; i > targetIndex; i--) {
+                cells.set(i, tempCells.get(i - 1));
+            }
+            cells.set(targetIndex, sourceCell);
+        }
+
+        // 重新布局
+        requestLayout();
     }
+
+    // 在CellLayout类中添加
+    private OnCellsChangedListener onCellsChangedListener;
+
+    // 在初始化工作区时调用此方法填充空白单元格
+    public void fillEmptyCells() {
+        int totalCells = rows * columns;
+        int currentSize = cells.size();
+
+        // 如果当前单元格数量少于总单元格数，添加空白单元格
+        for (int i = currentSize; i < totalCells; i++) {
+            // 创建空白单元格
+            View emptyView = new View(getContext());
+            emptyView.setBackgroundColor(Color.TRANSPARENT);
+
+            // 创建空白单元格并添加
+            Cell emptyCell = new Cell("empty", emptyView);
+            cells.add(emptyCell);
+
+            // 添加到布局但设为不可见
+            if (emptyView.getParent() != null) {
+                ((ViewGroup)emptyView.getParent()).removeView(emptyView);
+            }
+            emptyView.setVisibility(View.INVISIBLE);
+            addView(emptyView);
+        }
+
+        Log.d(TAG, "已填充空白单元格：总计 " + totalCells + " 个单元格");
+    }
+
+    public interface OnCellsChangedListener {
+        void onCellsChanged();
+    }
+
+    public void setOnCellsChangedListener(OnCellsChangedListener listener) {
+        this.onCellsChangedListener = listener;
+    }
+
     @Override
     protected void dispatchDraw(Canvas canvas) {
         super.dispatchDraw(canvas);
-        if (highLightColumn != -1 && highLightRow != -1) {
+
+        // 只在有效的高亮情况下绘制
+        if (highLightColumn >= 0 && highLightRow >= 0) {
             Paint paint = new Paint();
-            paint.setColor(highLightValid ? Color.argb(100, 0, 255, 0) : Color.argb(100, 255, 0, 0));
+
+            // 始终使用绿色表示可放置，不再使用红色
+            paint.setColor(Color.argb(80, 0, 200, 0));
+            paint.setStyle(Paint.Style.FILL);
+
+            // 计算高亮区域
             int left = highLightColumn * per_cell_width;
             int top = highLightRow * per_cell_height;
-            int right = left + (per_cell_width * childExpectCellWidthNum); // 使用拖拽中的Cell尺寸
-            int bottom = top + (per_cell_height * childExpectCellHeightNum);
+            int right = left + per_cell_width;
+            int bottom = top + per_cell_height;
+
+            // 绘制填充
+            canvas.drawRect(left, top, right, bottom, paint);
+
+            // 绘制边框
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setColor(Color.rgb(0, 150, 0));
+            paint.setStrokeWidth(2);
             canvas.drawRect(left, top, right, bottom, paint);
         }
     }
@@ -403,7 +558,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         public Cell(String tag, View view) {
             this.tag = tag;
             this.contentView = view;
-            this.contentView.setOnLongClickListener(new OnLongClickListener() {
+           /* this.contentView.setOnLongClickListener(new OnLongClickListener() {
                 @Override
                 public boolean onLongClick(View v) {
                     DragShadowBuilder builder = new DragShadowBuilder(v);
@@ -411,7 +566,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     v.startDrag(null, builder, Cell.this, 0);
                     return true;
                 }
-            });
+            });*/
         }
 
         public String getTag() {
@@ -464,57 +619,38 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
 
     }
 
-    public void swapCells(Cell draggingCell, int targetColumnIndex, int targetRowIndex) {
-        // 保存原位置
-        int originalColumnIndex = draggingCell.getExpectColumnIndex();
-        int originalRowIndex = draggingCell.getExpectRowIndex();
-
-        // 查找目标位置是否已有Cell
-        Cell targetCell = null;
-        for (Cell cell : cells) {
-            if (cell.getExpectColumnIndex() == targetColumnIndex &&
-                    cell.getExpectRowIndex() == targetRowIndex) {
-                targetCell = cell;
-                break;
-            }
+     private void swapCells(int sourceIndex, int targetIndex)  {
+        // 确保索引有效
+        if (sourceIndex < 0 || sourceIndex >= cells.size() ||
+                targetIndex < 0 || targetIndex >= cells.size()) {
+            Log.e(TAG, "交换单元格时索引无效: 源=" + sourceIndex + ", 目标=" + targetIndex);
+            return;
         }
 
-        // 清除拖动的Cell原位置
-        for (int i = originalColumnIndex; i < originalColumnIndex + draggingCell.getWidthNum(); i++) {
-            for (int j = originalRowIndex; j < originalRowIndex + draggingCell.getHeightNum(); j++) {
-                if (j < rows && i < columns) {
-                    cellHolds[j][i] = false;
-                }
-            }
+        if (sourceIndex == targetIndex) {
+            return; // 相同位置不需要交换
         }
 
-        // 如果目标位置有Cell，将其移动到原位置
-        if (targetCell != null) {
-            // 清除目标Cell原位置
-            for (int i = targetCell.getExpectColumnIndex();
-                 i < targetCell.getExpectColumnIndex() + targetCell.getWidthNum(); i++) {
-                for (int j = targetCell.getExpectRowIndex();
-                     j < targetCell.getExpectRowIndex() + targetCell.getHeightNum(); j++) {
-                    if (j < rows && i < columns) {
-                        cellHolds[j][i] = false;
-                    }
-                }
-            }
+        Log.d(TAG, "交换单元格: " + sourceIndex + " <-> " + targetIndex);
 
-            // 将目标Cell放到拖动Cell的原位置
-            targetCell.setExpectColumnIndex(originalColumnIndex);
-            targetCell.setExpectRowIndex(originalRowIndex);
+        // 简单交换两个单元格
+        Cell sourceCell = cells.get(sourceIndex);
+        Cell targetCell = cells.get(targetIndex);
 
-            // 填充目标Cell的新位置
-            fillCellLayout(originalColumnIndex, originalRowIndex,
-                    targetCell.getWidthNum(), targetCell.getHeightNum());
+        cells.set(sourceIndex, targetCell);
+        cells.set(targetIndex, sourceCell);
+
+        // 确保视图正确显示
+        if (sourceCell.getContentView() != null) {
+            sourceCell.getContentView().setVisibility(View.VISIBLE);
+            sourceCell.getContentView().setAlpha(1.0f);
         }
 
-        // 填充拖动的Cell的新位置
-        draggingCell.setExpectColumnIndex(targetColumnIndex);
-        draggingCell.setExpectRowIndex(targetRowIndex);
-        fillCellLayout(targetColumnIndex, targetRowIndex,
-                draggingCell.getWidthNum(), draggingCell.getHeightNum());
+        if (targetCell.getContentView() != null) {
+            targetCell.getContentView().setVisibility(
+                    targetCell.getTag().equals("empty") ? View.INVISIBLE : View.VISIBLE
+            );
+        }
 
         // 重新布局
         requestLayout();

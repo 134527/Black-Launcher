@@ -357,15 +357,15 @@
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         android:columnCount="3"
-                        android:rowCount="3"
-                        android:padding="8dp">
+                        android:rowCount="2"
+                        android:padding="9dp">
 
 
 
                     </GridLayout>
                     </ScrollView>
                         <!-- 添加透明遮罩层用于处理点击事件 -->
-                        <View
+                        <com.msk.blacklauncher.view.CardTouchInterceptor
                             android:id="@+id/settingsCardOverlay"
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
@@ -413,14 +413,13 @@
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         android:columnCount="3"
-                        android:rowCount="3"
-                        android:padding="8dp">
+                        android:rowCount="2"
+                        android:padding="9dp">
 
                         <!-- 9个应用图标位置 -->
                     </GridLayout>
                     </ScrollView>
-                        <!-- 添加透明遮罩层用于处理点击事件 -->
-                        <View
+                        <com.msk.blacklauncher.view.CardTouchInterceptor
                             android:id="@+id/officeCardOverlay"
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
@@ -470,16 +469,16 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:columnCount="3"
-                            android:padding="8dp">
+                            android:padding="9dp">
                         </GridLayout>
                     </ScrollView>
-                        <!-- 添加透明遮罩层用于处理点击事件 -->
-                        <View
+                        <com.msk.blacklauncher.view.CardTouchInterceptor
                             android:id="@+id/appsCardOverlay"
                             android:layout_width="match_parent"
                             android:layout_height="match_parent"
                             android:background="@android:color/transparent"
-                           />
+                            android:clickable="true"
+                            android:focusable="true"/>
                     </FrameLayout>
                 </androidx.cardview.widget.CardView>
 

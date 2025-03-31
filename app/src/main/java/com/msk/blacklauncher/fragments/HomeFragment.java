@@ -47,6 +47,7 @@ import androidx.fragment.app.Fragment;
 
 import com.msk.blacklauncher.R;
 import com.msk.blacklauncher.SettingsActivity;
+import com.msk.blacklauncher.view.CardTouchInterceptor;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
@@ -82,9 +83,9 @@ public class HomeFragment extends Fragment {
     private PackageManager pm;
     private static final int PICK_IMAGE = 100;
     private View view;
-    private View settingsOverlay;
-    private View officeOverlay;
-    private View appsOverlay;
+    private CardTouchInterceptor settingsOverlay;
+    private CardTouchInterceptor officeOverlay;
+    private CardTouchInterceptor appsOverlay;
 
 
     @Override
@@ -148,7 +149,7 @@ public class HomeFragment extends Fragment {
         officeOverlay = view.findViewById(R.id.officeCardOverlay);
         appsOverlay = view.findViewById(R.id.appsCardOverlay);
 
-        // 设置遮罩层不拦截触摸事件
+     /*   // 设置遮罩层不拦截触摸事件
         View.OnTouchListener touchListener = (v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_UP) {
                 handleCardClick(v.getParent().getParent() instanceof CardView ?
@@ -156,7 +157,11 @@ public class HomeFragment extends Fragment {
                         () -> showAppsDialog(getDialogTitle(v.getId()), getCategoryByViewId(v.getId())));
             }
             return false; // 返回 false 表示不拦截事件
-        };
+        };*/
+        // 设置空白区域点击监听器
+        settingsOverlay.setOnClickListener(v -> showAppsDialog(getDialogTitle(v.getId()),getCategoryByViewId(v.getId())));
+        officeOverlay.setOnClickListener(v -> showAppsDialog(getDialogTitle(v.getId()),getCategoryByViewId(v.getId())));
+        appsOverlay.setOnClickListener(v -> showAppsDialog(getDialogTitle(v.getId()),getCategoryByViewId(v.getId())));
 
         categorizeAndDisplayApps();
         setupClickListeners(); // 初始化点击监听器
@@ -193,8 +198,8 @@ public class HomeFragment extends Fragment {
         });
 
         tvModeCard.setOnClickListener(v -> handleCardClick(v, this::launchTVModeDialog));
-        themeCard.setOnClickListener(v -> handleCardClick(v, this::openThemeSettings));
-        screensaverCard.setOnClickListener(v -> handleCardClick(v, this::openWallpaperChooser));
+        themeCard.setOnClickListener(v -> handleCardClick(v, this::openWallpaperChooser));
+        screensaverCard.setOnClickListener(v -> handleCardClick(v, this::openThemeSettings));
         whiteboardCard.setOnClickListener(v -> handleCardClick(v, this::openWhiteboard));
         toolsCard.setOnClickListener(v -> openToolsGrid());
 
@@ -513,7 +518,7 @@ public class HomeFragment extends Fragment {
     }
 
     private void openThemeSettings() {
-        // 实现主题设置逻辑
+
     }
 
 

@@ -1,6 +1,7 @@
 package com.msk.blacklauncher.adapters;
 
 import android.content.Context;
+import android.os.Handler;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -64,8 +65,14 @@ public class WorkspacePagerAdapter extends RecyclerView.Adapter<WorkspacePagerAd
         return new PageViewHolder(pageView);
     }
 
-    @Override
+     @Override
     public void onBindViewHolder(@NonNull PageViewHolder holder, int position) {
+        // 日志跟踪
+        Log.d(TAG, "绑定页面: " + position);
+
+        // 设置页面标记用于识别
+        holder.itemView.setTag("page_" + position);
+
         // 配置CellLayout
         if (holder.cellLayout != null) {
             holder.cellLayout.setColumns(columns);
@@ -74,31 +81,40 @@ public class WorkspacePagerAdapter extends RecyclerView.Adapter<WorkspacePagerAd
             // 清空现有视图
             holder.cellLayout.removeAllViews();
 
-            // 设置溢出监听器
-            holder.cellLayout.setOnCellOverflowListener(overflowCell -> {
-                Log.d(TAG, "单元格溢出: " + (overflowCell != null ? overflowCell.getTag() : "null"));
-                if (cellActionListener != null) {
-                    return cellActionListener.onCellOverflow(overflowCell, position);
-                }
-                return false;
-            });
-
             // 获取页面单元格
             if (position < pages.size()) {
                 List<CellLayout.Cell> pageCells = pages.get(position);
                 if (pageCells != null) {
-                    // 添加单元格
-                    for (CellLayout.Cell cell : pageCells) {
-                        if (cell != null && !cell.getTag().equals("empty") && cell.getContentView() != null) {
-                            try {
-                                holder.cellLayout.addCell(cell);
-                            } catch (Exception e) {
-                                Log.e(TAG, "添加单元格失败", e);
+                    Log.d(TAG, "页面 " + position + " 有 " + pageCells.size() + " 个单元格");
+
+                    // 添加非空单元格并详细记录
+                    int nonEmptyCells = 0;
+                    for (int i = 0; i < pageCells.size(); i++) {
+                        CellLayout.Cell cell = pageCells.get(i);
+                        if (cell != null) {
+                            Log.d(TAG, "检查单元格 " + i + ": tag=" + cell.getTag() +
+                                    ", contentView=" + (cell.getContentView() != null ? "有效" : "null"));
+
+                            if (cell.getContentView() != null && !cell.getTag().equals("empty")) {
+                                try {
+                                    // 强制设置视图可见
+                                    cell.getContentView().setVisibility(View.VISIBLE);
+                                    holder.cellLayout.addCell(cell);
+                                    nonEmptyCells++;
+                                    Log.d(TAG, "成功添加单元格 " + i + ": " + cell.getTag());
+                                } catch (Exception e) {
+                                    Log.e(TAG, "添加单元格失败: " + cell.getTag(), e);
+                                }
                             }
                         }
                     }
+
+                    Log.d(TAG, "添加了 " + nonEmptyCells + " 个非空单元格到页面 " + position);
                 }
             }
+
+            // 在添加完应用图标后填充空白单元格
+            holder.cellLayout.fillEmptyCells();
         }
     }
 
