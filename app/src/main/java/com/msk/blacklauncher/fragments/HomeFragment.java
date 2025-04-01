@@ -1,5 +1,7 @@
 package com.msk.blacklauncher.fragments;
 
+import static android.content.pm.ApplicationInfo.getCategoryTitle;
+
 import android.animation.Animator;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
@@ -18,11 +20,13 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.MediaStore;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -47,6 +51,8 @@ import androidx.fragment.app.Fragment;
 
 import com.msk.blacklauncher.R;
 import com.msk.blacklauncher.SettingsActivity;
+import com.msk.blacklauncher.Utils.AppLayoutManager;
+import com.msk.blacklauncher.model.AppModel;
 import com.msk.blacklauncher.view.CardTouchInterceptor;
 
 import java.io.IOException;
@@ -54,6 +60,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -98,7 +105,13 @@ public class HomeFragment extends Fragment {
         dateTextView = view.findViewById(R.id.dateText);
         initViews(view);
 
-
+        if (isFirstLaunch()) {
+            Log.d("HomeFragment", "检测到首次启动，加载默认应用");
+            loadDefaultApps();
+        } else {
+            // 加载已保存的应用
+            loadSavedAppsToGrids();
+        }
         // 初始化分类
         for (AppCategory category : AppCategory.values()) {
             categorizedApps.put(category, new ArrayList<>());
@@ -118,14 +131,105 @@ public class HomeFragment extends Fragment {
         filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
         filter.addDataScheme("package");
         requireActivity().registerReceiver(appUpdateReceiver, filter);
-
-
+        // 从持久化存储加载应用布局
+        loadSavedAppsToGrids();
+        fixMissingTags();
         timeTextView.setOnLongClickListener(v -> {
             openSettings();
             return true;
         });
         return view;
     }
+
+    private void fixMissingTags() {
+        fixMissingTagsInGrid(settingsGrid, "设置");
+        fixMissingTagsInGrid(officeGrid, "办公");
+        fixMissingTagsInGrid(appsGrid, "应用");
+    }
+
+    private void fixMissingTagsInGrid(GridLayout grid, String gridName) {
+        PackageManager pm = requireContext().getPackageManager();
+
+        for (int i = 0; i < grid.getChildCount(); i++) {
+            View child = grid.getChildAt(i);
+            if (child.getTag() == null && child instanceof LinearLayout) {
+                LinearLayout container = (LinearLayout) child;
+
+                // 获取应用名称
+                if (container.getChildCount() > 1 && container.getChildAt(1) instanceof TextView) {
+                    TextView labelView = (TextView) container.getChildAt(1);
+                    String appName = labelView.getText().toString();
+
+                    // 查找对应的包名
+                    String packageName = findPackageNameByAppName(appName);
+                    if (packageName != null) {
+                        container.setTag(packageName);
+                        Log.d("HomeFragment", "修复" + gridName + "网格中应用标签: " + appName + " -> " + packageName);
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean isFirstLaunch() {
+        SharedPreferences prefs = requireContext().getSharedPreferences("launcher_prefs", Context.MODE_PRIVATE);
+        return prefs.getBoolean("is_first_launch", true);
+    }
+
+    private void setFirstLaunchCompleted() {
+        SharedPreferences prefs = requireContext().getSharedPreferences("launcher_prefs", Context.MODE_PRIVATE);
+        prefs.edit().putBoolean("is_first_launch", false).apply();
+    }
+
+    private void loadDefaultApps() {
+        Log.d("HomeFragment", "正在加载默认应用...");
+
+        // 设置卡片默认应用
+        List<String> defaultSettingsApps = new ArrayList<>();
+        defaultSettingsApps.add("com.android.settings"); // 设置
+        defaultSettingsApps.add("com.android.deskclock"); // 时钟
+        defaultSettingsApps.add("com.android.calculator2"); // 计算器
+
+        // 办公卡片默认应用
+        List<String> defaultOfficeApps = new ArrayList<>();
+        defaultOfficeApps.add("com.android.contacts"); // 联系人
+        defaultOfficeApps.add("com.android.calendar"); // 日历
+        defaultOfficeApps.add("com.android.email"); // 邮件
+
+        // 应用卡片默认应用
+        List<String> defaultApps = new ArrayList<>();
+        defaultApps.add("com.android.vending"); // Play商店
+        defaultApps.add("com.android.chrome"); // Chrome浏览器
+        defaultApps.add("com.google.android.gm"); // Gmail
+
+        // 保存默认应用到持久化存储
+        AppLayoutManager.saveAppsForCard(requireContext(), AppLayoutManager.getSettingsCardKey(), defaultSettingsApps);
+        AppLayoutManager.saveAppsForCard(requireContext(), AppLayoutManager.getOfficeCardKey(), defaultOfficeApps);
+        AppLayoutManager.saveAppsForCard(requireContext(), AppLayoutManager.getAppsCardKey(), defaultApps);
+
+        // 标记首次启动完成
+        setFirstLaunchCompleted();
+
+        // 刷新网格显示默认应用
+        loadSavedAppsToGrids();
+    }
+
+    private String findPackageNameByAppName(String appName) {
+        PackageManager pm = requireContext().getPackageManager();
+        Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
+        mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> resolveInfos = pm.queryIntentActivities(mainIntent, 0);
+
+        for (ResolveInfo resolveInfo : resolveInfos) {
+            String label = resolveInfo.loadLabel(pm).toString();
+            if (label.equals(appName)) {
+                return resolveInfo.activityInfo.packageName;
+            }
+        }
+
+        return null;
+    }
+
     private void initViews(View view) {
         basicToolsGrid = view.findViewById(R.id.basicToolsContainer);
         settingsGrid = view.findViewById(R.id.basicSettingGrid);
@@ -149,24 +253,255 @@ public class HomeFragment extends Fragment {
         officeOverlay = view.findViewById(R.id.officeCardOverlay);
         appsOverlay = view.findViewById(R.id.appsCardOverlay);
 
-     /*   // 设置遮罩层不拦截触摸事件
-        View.OnTouchListener touchListener = (v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_UP) {
-                handleCardClick(v.getParent().getParent() instanceof CardView ?
-                                (CardView)v.getParent().getParent() : null,
-                        () -> showAppsDialog(getDialogTitle(v.getId()), getCategoryByViewId(v.getId())));
-            }
-            return false; // 返回 false 表示不拦截事件
-        };*/
+
         // 设置空白区域点击监听器
         settingsOverlay.setOnClickListener(v -> showAppsDialog(getDialogTitle(v.getId()),getCategoryByViewId(v.getId())));
         officeOverlay.setOnClickListener(v -> showAppsDialog(getDialogTitle(v.getId()),getCategoryByViewId(v.getId())));
         appsOverlay.setOnClickListener(v -> showAppsDialog(getDialogTitle(v.getId()),getCategoryByViewId(v.getId())));
 
+
         categorizeAndDisplayApps();
         setupClickListeners(); // 初始化点击监听器
 //        appsCard = view.findViewById(R.id.appsCard);
     }
+
+    // 修改此方法，使用传入的view参数而非requireView()
+    private void loadSavedAppsToGrids() {
+        // 加载设置类应用
+        String settingsKey = AppLayoutManager.getSettingsCardKey();
+        List<String> settingsApps = AppLayoutManager.getAppsForCard(requireContext(), settingsKey);
+        Log.d("HomeFragment", "加载设置应用，数量: " + settingsApps.size());
+        loadAppsToGrid(settingsApps, settingsGrid, settingsKey);
+
+        // 加载办公类应用
+        String officeKey = AppLayoutManager.getOfficeCardKey();
+        List<String> officeApps = AppLayoutManager.getAppsForCard(requireContext(), officeKey);
+        Log.d("HomeFragment", "加载办公应用，数量: " + officeApps.size());
+        loadAppsToGrid(officeApps, officeGrid, officeKey);
+
+        // 加载应用类应用
+        String appsKey = AppLayoutManager.getAppsCardKey();
+        List<String> apps = AppLayoutManager.getAppsForCard(requireContext(), appsKey);
+        Log.d("HomeFragment", "加载通用应用，数量: " + apps.size());
+        loadAppsToGrid(apps, appsGrid, appsKey);
+    }
+
+
+    private void loadAppsToGrid(List<String> packageNames, GridLayout grid, String cardKey) {
+        if (packageNames.isEmpty()) {
+            Log.d("HomeFragment", "没有保存的应用，跳过加载");
+            return;
+        }
+
+        PackageManager pm = requireContext().getPackageManager();
+
+        // 清空现有网格内容
+        grid.removeAllViews();
+
+        for (String packageName : packageNames) {
+            try {
+                // 尝试获取应用信息
+                ApplicationInfo appInfo = pm.getApplicationInfo(packageName, 0);
+
+                // 创建应用模型
+                AppModel appModel = new AppModel(
+                        appInfo.loadLabel(pm).toString(),
+                        appInfo.loadIcon(pm),
+                        packageName
+                );
+
+                // 添加到网格
+                addAppToGrid(appModel, grid, cardKey);
+                Log.d("HomeFragment", "成功加载应用: " + appModel.getAppName() + ", 包名: " + packageName);
+            } catch (PackageManager.NameNotFoundException e) {
+                Log.e("HomeFragment", "找不到应用: " + packageName + ", 将从存储中移除");
+                // 从存储中移除已卸载的应用
+                AppLayoutManager.removeAppFromCard(requireContext(), cardKey, packageName);
+            } catch (Exception e) {
+                Log.e("HomeFragment", "加载应用失败: " + packageName + ", 错误: " + e.getMessage());
+            }
+        }
+    }
+    private void refreshAllGrids() {
+        // 清空所有网格
+        settingsGrid.removeAllViews();
+        officeGrid.removeAllViews();
+        appsGrid.removeAllViews();
+
+        // 重新加载所有应用
+        loadSavedAppsToGrids();
+
+        // 记录日志
+        Log.d("HomeFragment", "已刷新所有网格");
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        refreshAllGrids(); // 每次回到前台都刷新一次
+    }
+
+    // 从包名获取应用模型
+    private AppModel getAppModelFromPackageName(String packageName) {
+        try {
+            android.content.pm.PackageManager pm = requireContext().getPackageManager();
+            android.content.pm.ApplicationInfo appInfo = pm.getApplicationInfo(packageName, 0);
+            String appName = pm.getApplicationLabel(appInfo).toString();
+            Drawable appIcon = pm.getApplicationIcon(appInfo);
+
+            return new AppModel(appName, appIcon, packageName);
+        } catch (Exception e) {
+            Log.e("HomeFragment", "获取应用信息失败: " + packageName, e);
+            return null;
+        }
+    }
+
+    // 添加应用到网格，并设置长按删除功能
+    private void addAppToGrid(AppModel app, GridLayout grid, String cardKey) {
+        View appView = createAppIconView(app);
+
+        // 设置点击启动应用
+        appView.setOnClickListener(v -> {
+            try {
+                Intent launchIntent = requireContext().getPackageManager()
+                        .getLaunchIntentForPackage(app.getPackageName());
+                if (launchIntent != null) {
+                    startActivity(launchIntent);
+                }
+            } catch (Exception e) {
+                Toast.makeText(requireContext(), "无法启动应用", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // 设置长按删除功能
+        appView.setOnLongClickListener(v -> {
+            showDeleteConfirmDialog(app, grid, cardKey);
+            return true;
+        });
+
+        // 设置布局参数
+        GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+        params.width = GridLayout.LayoutParams.WRAP_CONTENT;
+        params.height = GridLayout.LayoutParams.WRAP_CONTENT;
+        params.setMargins(16,16,16,16);
+
+        // 添加到网格
+        appView.setLayoutParams(params);
+        grid.addView(appView);
+    }
+
+    private View createAppIconView(AppModel app) {
+        LinearLayout container = new LinearLayout(requireContext());
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setGravity(Gravity.CENTER);
+
+        // 创建图标
+        ImageView iconView = new ImageView(requireContext());
+        iconView.setLayoutParams(new LinearLayout.LayoutParams(80,80));
+        iconView.setImageDrawable(app.getAppIcon());
+        iconView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+
+        // 创建文本
+        TextView labelView = new TextView(requireContext());
+        labelView.setText(app.getAppName());
+        labelView.setTextColor(Color.WHITE);
+        labelView.setTextSize(12);
+        labelView.setGravity(Gravity.CENTER);
+        labelView.setMaxLines(1);
+        labelView.setEllipsize(TextUtils.TruncateAt.END);
+
+        // 添加到容器
+        container.addView(iconView);
+        container.addView(labelView);
+
+        // 关键修复：明确设置包名作为标签
+        String packageName = app.getPackageName();
+        container.setTag(packageName);
+        Log.d("HomeFragment", "创建应用图标，设置标签: " + packageName);
+
+        return container;
+    }
+    private void showDeleteConfirmDialog(AppModel app, GridLayout grid, String cardKey) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(requireContext());
+        builder.setTitle("移除应用图标")
+                .setMessage("是否要从此卡片中移除 " + app.getAppName() + "?")
+                .setPositiveButton("确定", (dialog, which) -> {
+                    String packageName = app.getPackageName();
+
+                    // 输出调试信息
+                    Log.d("HomeFragment", "开始删除应用 " + app.getAppName() + " (包名: " + packageName + ")");
+                    Log.d("HomeFragment", "删除前网格子视图数量: " + grid.getChildCount());
+
+                    // 从卡片视图中移除
+                    boolean removed = removeAppFromCardView(grid, packageName);
+
+                    // 从持久化存储中移除
+                    AppLayoutManager.removeAppFromCard(requireContext(), cardKey, packageName);
+
+                    // 从 categorizedApps 中移除
+                    if (categorizedApps != null) {
+                        AppCategory category = getCategoryFromCardKey(cardKey);
+                        if (category != null && categorizedApps.containsKey(category)) {
+                            List<ApplicationInfo> appList = categorizedApps.get(category);
+                            if (appList != null) {
+                                // 移除包名匹配的应用
+                                Iterator<ApplicationInfo> iterator = appList.iterator();
+                                while (iterator.hasNext()) {
+                                    ApplicationInfo info = iterator.next();
+                                    if (info.packageName.equals(packageName)) {
+                                        iterator.remove();
+                                        Log.d("HomeFragment", "已从 categorizedApps 中移除应用: " + packageName);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 如果直接删除失败，则尝试重新加载整个网格
+                    if (!removed) {
+                        Log.d("HomeFragment", "直接删除失败，尝试重新加载网格");
+                        reloadGridFromStorage(grid, cardKey);
+                    }
+
+                    Log.d("HomeFragment", "删除后网格子视图数量: " + grid.getChildCount());
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private AppCategory getCategoryFromCardKey(String cardKey) {
+        if (cardKey.equals(AppLayoutManager.getSettingsCardKey())) {
+            return AppCategory.SETTINGS;
+        } else if (cardKey.equals(AppLayoutManager.getOfficeCardKey())) {
+            return AppCategory.OFFICE;
+        } else if (cardKey.equals(AppLayoutManager.getAppsCardKey())) {
+            return AppCategory.APPS;
+        }
+        return null;
+    }
+
+    private void reloadGridFromStorage(GridLayout grid, String cardKey) {
+        // 清空网格
+        grid.removeAllViews();
+
+        // 从存储加载应用列表
+        List<String> packageNames = AppLayoutManager.getAppsForCard(requireContext(), cardKey);
+        Log.d("HomeFragment", "从存储重新加载网格, 应用数量: " + packageNames.size());
+
+        // 重新加载应用到网格
+        for (String packageName : packageNames) {
+            try {
+                AppModel app = getAppModelFromPackageName(packageName);
+                if (app != null) {
+                    addAppToGrid(app, grid, cardKey);
+                }
+            } catch (Exception e) {
+                Log.e("HomeFragment", "重新加载应用失败: " + packageName, e);
+            }
+        }
+    }
+
 
     private void setupClickListeners() {
         // 设置搜索按钮点击事件
@@ -396,6 +731,7 @@ public class HomeFragment extends Fragment {
                         startActivity(launchIntent);
                     }
                 });
+                appContainer.setTag(app.packageName);
 
                 basicToolsLayout.addView(appContainer);
             }
@@ -445,7 +781,7 @@ public class HomeFragment extends Fragment {
                         startActivity(launchIntent);
                     }
                 });
-
+                appContainer.setTag(app.packageName);
                 grid.addView(appContainer);
             }
         }
@@ -550,100 +886,231 @@ public class HomeFragment extends Fragment {
     private void openAppsGrid() {
         // 实现应用网格逻辑
     }
- private void showAppsDialog(String title, AppCategory category) {
+ private void showAppsDialog(String title, AppCategory category){
         Dialog dialog = new Dialog(requireContext(), R.style.BlurDialogTheme);
         dialog.setContentView(R.layout.dialog_apps_grid);
 
         Window window = dialog.getWindow();
-     if (window != null) {
-         window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
 
-         // 设置对话框大小和位置
-         WindowManager.LayoutParams params = window.getAttributes();
-         params.width = 1440; // 固定宽度
-         params.height =810; // 固定高度
-         params.gravity = Gravity.CENTER; // 居中显示
-         window.setAttributes(params);
-     }
-     TextView titleView = dialog.findViewById(R.id.dialogTitle);
-     GridLayout dialogAppsGrid = dialog.findViewById(R.id.dialogAppsGrid);
-     Button addButton = dialog.findViewById(R.id.addAppButton);
+            // 设置对话框大小和位置
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = 1440; // 固定宽度
+            params.height = 810; // 固定高度
+            params.gravity = Gravity.CENTER; // 居中显示
+            window.setAttributes(params);
+        }
+        TextView titleView = dialog.findViewById(R.id.dialogTitle);
+        GridLayout dialogAppsGrid = dialog.findViewById(R.id.dialogAppsGrid);
+        Button addButton = dialog.findViewById(R.id.addAppButton);
 
-     titleView.setText(title);
+        titleView.setText(title);
 
-     // 根据类别获取对应的原始网格
-     GridLayout sourceGrid = null;
-     switch (category) {
-         case SETTINGS:
-             sourceGrid = settingsGrid;
-             break;
-         case OFFICE:
-             sourceGrid = officeGrid;
-             break;
-         case APPS:
-             sourceGrid = appsGrid;
-             break;
-     }
-
-     // 从原始网格复制应用图标到对话框网格
-     if (sourceGrid != null) {
-         for (int i = 0; i < sourceGrid.getChildCount(); i++) {
-             View child = sourceGrid.getChildAt(i);
-             if (child instanceof LinearLayout) {
-                 LinearLayout originalContainer = (LinearLayout) child;
-
-                 // 创建新的应用容器
-                 LinearLayout newContainer = new LinearLayout(requireContext());
-                 newContainer.setOrientation(LinearLayout.VERTICAL);
-                 newContainer.setGravity(Gravity.CENTER);
-
-                 GridLayout.LayoutParams params = new GridLayout.LayoutParams();
-                 params.width = GridLayout.LayoutParams.WRAP_CONTENT;
-                 params.height = GridLayout.LayoutParams.WRAP_CONTENT;
-                 params.setMargins(16, 16, 16, 16);
-                 newContainer.setLayoutParams(params);
-
-                 // 复制图标
-                 ImageView originalIcon = (ImageView) originalContainer.getChildAt(0);
-                 ImageView newIcon = new ImageView(requireContext());
-                 newIcon.setLayoutParams(new LinearLayout.LayoutParams(120, 120));
-                 newIcon.setImageDrawable(originalIcon.getDrawable());
-                 newIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-
-                 // 复制文本
-                 TextView originalText = (TextView) originalContainer.getChildAt(1);
-                 TextView newText = new TextView(requireContext());
-                 newText.setText(originalText.getText());
-                 newText.setTextColor(Color.BLACK);
-                 newText.setTextSize(12);
-                 newText.setGravity(Gravity.CENTER);
-                 newText.setMaxLines(1);
-                 newText.setEllipsize(TextUtils.TruncateAt.END);
-
-                 // 添加到新容器
-                 newContainer.addView(newIcon);
-                 newContainer.addView(newText);
-
-                 // 设置点击事件
-                 newContainer.setOnClickListener(v -> {
-                     if (originalContainer.hasOnClickListeners()) {
-                         originalContainer.performClick();
-                     }
-                     dialog.dismiss();
-                 });
+        // 根据类别获取对应的原始网格
+        GridLayout sourceGrid = null;
+        String cardKey = null;
+        switch (category) {
+            case SETTINGS:
+                sourceGrid = settingsGrid;
+                cardKey = AppLayoutManager.getSettingsCardKey();
+                break;
+            case OFFICE:
+                sourceGrid = officeGrid;
+                cardKey = AppLayoutManager.getOfficeCardKey();
+                break;
+            case APPS:
+                sourceGrid = appsGrid;
+                cardKey = AppLayoutManager.getAppsCardKey();
+                break;
+        }
 
 
-                 dialogAppsGrid.addView(newContainer);
-             }
-         }
-     }
+        // 从原始网格复制应用图标到对话框网格
+        if (sourceGrid != null) {
+            final String finalCardKey = cardKey;
+            final GridLayout finalSourceGrid = sourceGrid;
 
-     addButton.setOnClickListener(v -> {
-         showAppPickerDialog(category, dialog);
-     });
-     dialog.show();
- }
- private void showAppPickerDialog(AppCategory category, Dialog parentDialog) {
+            for (int i = 0; i < sourceGrid.getChildCount(); i++) {
+                View child = sourceGrid.getChildAt(i);
+                if (child instanceof LinearLayout) {
+                    LinearLayout originalContainer = (LinearLayout) child;
+
+
+
+                    LinearLayout newContainer = new LinearLayout(requireContext());
+                    newContainer.setOrientation(LinearLayout.VERTICAL);
+                    newContainer.setGravity(Gravity.CENTER);
+
+
+                    GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+                    params.width = GridLayout.LayoutParams.WRAP_CONTENT;
+                    params.height = GridLayout.LayoutParams.WRAP_CONTENT;
+                    params.setMargins(16, 16, 16, 16);
+                    newContainer.setLayoutParams(params);
+
+                    // 复制图标
+                    ImageView originalIcon = (ImageView) originalContainer.getChildAt(0);
+                    ImageView newIcon = new ImageView(requireContext());
+                    newIcon.setLayoutParams(new LinearLayout.LayoutParams(120, 120));
+                    newIcon.setImageDrawable(originalIcon.getDrawable());
+                    newIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+
+                    // 复制文本
+                    TextView originalText = (TextView) originalContainer.getChildAt(1);
+                    TextView newText = new TextView(requireContext());
+                    newText.setText(originalText.getText());
+                    newText.setTextColor(Color.BLACK);
+                    newText.setTextSize(12);
+                    newText.setGravity(Gravity.CENTER);
+                    newText.setMaxLines(1);
+                    newText.setEllipsize(TextUtils.TruncateAt.END);
+
+                    // 保存应用包名作为标签，用于删除操作
+                    String packageName = (String) originalContainer.getTag();
+                    newContainer.setTag(packageName);
+                    // 添加空值检查
+                    if (packageName == null) {
+                        Log.w("HomeFragment", "警告：原始容器标签为空，跳过创建此项");
+                        String appName = null;
+                        if (originalContainer.getChildCount() > 1 &&
+                                originalContainer.getChildAt(1) instanceof TextView) {
+                            TextView textView = (TextView) originalContainer.getChildAt(1);
+                            appName = textView.getText().toString();
+
+                            // 通过应用名称查找包名
+                            if (appName != null && !appName.isEmpty()) {
+                                // 这里需要通过应用名称查找包名，有点复杂
+                                // 暂时跳过，后续可以实现
+                                Log.w("HomeFragment", "标签为空的应用名称: " + appName);
+                            }
+                        }
+
+                        // 如果无法获取包名，跳过创建
+                        Log.w("HomeFragment", "警告：原始容器标签为空，跳过创建此项");
+                        continue;
+                    }
+
+                    Log.d("HomeFragment", "复制应用到对话框，包名: " + packageName);
+                    // 添加到新容器
+                    newContainer.addView(newIcon);
+                    newContainer.addView(newText);
+                    fixMissingTags();
+                    // 设置点击事件
+                    newContainer.setOnClickListener(v -> {
+
+                        if (originalContainer.hasOnClickListeners()) {
+                            originalContainer.performClick();
+                        }
+                        dialog.dismiss();
+                    });
+
+                    // 添加长按删除功能
+                    newContainer.setOnLongClickListener(v -> {
+                        if (packageName == null) {
+                            Log.e("HomeFragment", "长按删除失败：包名为空");
+                            Toast.makeText(requireContext(), "无法删除此图标", Toast.LENGTH_SHORT).show();
+                            return true;
+                        }
+                        // 显示删除确认对话框
+                        showDeleteConfirmDialog(newText.getText().toString(), packageName,
+                                dialogAppsGrid, finalSourceGrid, newContainer, finalCardKey);
+                        return true;
+                    });
+
+
+                    dialogAppsGrid.addView(newContainer);
+                }
+            }
+        }
+
+        addButton.setOnClickListener(v -> {
+            showAppPickerDialog(category, dialog);
+        });
+        dialog.show();
+    }
+
+    private void showDeleteConfirmDialog(String appName, String packageName,
+                                         GridLayout dialogGrid, GridLayout sourceGrid,
+                                         View dialogContainerView, String cardKey) {
+        // 添加空值检查
+        if (sourceGrid == null || packageName == null) {
+            Log.e("HomeFragment", "删除失败：源网格或包名为空 - " +
+                    "网格:" + (sourceGrid == null ? "null" : "非空") +
+                    "，包名:" + (packageName == null ? "null" : packageName));
+            Toast.makeText(requireContext(), "无法删除应用图标", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // 原有代码
+        AlertDialog.Builder builder = new AlertDialog.Builder(requireContext());
+        builder.setTitle("移除应用图标")
+                .setMessage("是否要从此卡片中移除 " + appName + "?")
+                .setPositiveButton("确定", (dialog, which) -> {
+                    // 从对话框网格中移除
+                    dialogGrid.removeView(dialogContainerView);
+
+                    // 从源卡片视图中移除
+                    removeAppFromCardView(sourceGrid, packageName);
+
+                    // 从持久化存储中移除
+                    AppLayoutManager.removeAppFromCard(requireContext(), cardKey, packageName);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /**
+     * 从卡片视图中移除应用图标
+     */
+    private boolean removeAppFromCardView(GridLayout cardGrid, String packageName) {
+        if (cardGrid == null || packageName == null) {
+            // 获取调用堆栈以追踪调用来源
+            StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+            StringBuilder callPath = new StringBuilder();
+            for (int i = 3; i < Math.min(6, stackTrace.length); i++) {
+                callPath.append(stackTrace[i].getClassName())
+                        .append(".").append(stackTrace[i].getMethodName())
+                        .append("(行:").append(stackTrace[i].getLineNumber()).append(")");
+                if (i < 5 && i < stackTrace.length - 1) callPath.append(" <- ");
+            }
+
+            Log.e("HomeFragment", "网格或包名为空 (调用来源: " + callPath.toString() + ")");
+            return false;
+        }
+
+        // 记录当前子视图数量
+        int childCount = cardGrid.getChildCount();
+        Log.d("HomeFragment", "开始在网格中搜索包名: " + packageName + " (共" + childCount + "个子视图)");
+
+        // 查找要移除的视图
+        View viewToRemove = null;
+        for (int i = 0; i < childCount; i++) {
+            View child = cardGrid.getChildAt(i);
+            Object tag = child != null ? child.getTag() : null;
+
+            Log.d("HomeFragment", "子视图 #" + i + " 标签: " + (tag == null ? "null" : tag));
+
+            // 添加空值检查
+            if (child != null && tag != null && packageName.equals(tag.toString())) {
+                viewToRemove = child;
+                Log.d("HomeFragment", "找到匹配的子视图，位置: " + i);
+                break;
+            }
+        }
+
+        // 如果找到要移除的视图，则移除它
+        if (viewToRemove != null) {
+            cardGrid.removeView(viewToRemove);
+            Log.d("HomeFragment", "已从卡片视图移除应用: " + packageName);
+            return true;
+        } else {
+            Log.w("HomeFragment", "未找到要移除的应用: " + packageName);
+            return false;
+        }
+    }
+
+    private void showAppPickerDialog(AppCategory category, Dialog parentDialog) {
         Dialog dialog = new Dialog(requireContext(), R.style.BlurDialogTheme);
         dialog.setContentView(R.layout.dialog_apps_grid);
 
@@ -679,21 +1146,30 @@ public class HomeFragment extends Fragment {
         List<ResolveInfo> resolveInfos = pm.queryIntentActivities(mainIntent, 0);
         List<ApplicationInfo> allApps = new ArrayList<>();
 
+        // 提取应用信息并排序
+
         for (ResolveInfo resolveInfo : resolveInfos) {
             try {
-                ApplicationInfo appInfo = pm.getApplicationInfo(resolveInfo.activityInfo.packageName, 0);
+                // 修复：确保正确获取包名
+                String packageName = resolveInfo.activityInfo.packageName;
+
+                // 通过包名获取完整的应用信息
+                ApplicationInfo appInfo = pm.getApplicationInfo(packageName, 0);
                 allApps.add(appInfo);
-            } catch (PackageManager.NameNotFoundException e) {
-                e.printStackTrace();
+
+                // 添加调试日志
+                Log.d("HomeFragment", "找到应用: " + appInfo.loadLabel(pm) + ", 包名: " + packageName);
+            } catch (Exception e) {
+                Log.e("HomeFragment", "获取应用信息失败: " + e.getMessage());
             }
         }
 
         // 移除已经在当前分类中的应用
-        List<ApplicationInfo> currentApps = categorizedApps.get(category);
+     /*   List<ApplicationInfo> currentApps = categorizedApps.get(category);
         if (currentApps != null) {
             allApps.removeAll(currentApps);
         }
-
+*/
         // 显示所有可用的应用
         for (ApplicationInfo app : allApps) {
             LinearLayout appContainer = new LinearLayout(requireContext());
@@ -724,26 +1200,72 @@ public class HomeFragment extends Fragment {
 
             appContainer.setOnClickListener(v -> {
                 try {
-                    // 添加应用到对应分类
-                    categorizedApps.get(category).add(app);
+                    // 获取应用包名
+                    String packageName = app.packageName;
+                    Log.d("HomeFragment", "尝试添加应用: " + app.loadLabel(pm) + ", 包名: " + packageName);
 
-                    // 更新对应的网格
-                    GridLayout targetGrid = null;
+                    // 判断是否已经添加到持久化存储中
+                    String cardKey = null;
                     switch (category) {
                         case SETTINGS:
-                            targetGrid = settingsGrid;
+                            cardKey = AppLayoutManager.getSettingsCardKey();
                             break;
                         case OFFICE:
-                            targetGrid = officeGrid;
+                            cardKey = AppLayoutManager.getOfficeCardKey();
                             break;
                         case APPS:
-                            targetGrid = appsGrid;
+                            cardKey = AppLayoutManager.getAppsCardKey();
                             break;
                     }
 
-                    if (targetGrid != null) {
-                        targetGrid.removeAllViews();
-                        displayAppsInGrid(categorizedApps.get(category), targetGrid);
+                    // 添加应用到持久化存储
+                    if (cardKey != null) {
+                        // 添加到持久化存储
+                        List<String> currentApps = AppLayoutManager.getAppsForCard(requireContext(), cardKey);
+
+                        // 检查是否已经添加过
+                        if (currentApps.contains(packageName)) {
+                            Log.d("HomeFragment", "应用已存在，跳过添加: " + packageName);
+                            Toast.makeText(requireContext(), "此应用已添加", Toast.LENGTH_SHORT).show();
+                        } else {
+                            // 添加到列表
+                            currentApps.add(packageName);
+                            AppLayoutManager.saveAppsForCard(requireContext(), cardKey, currentApps);
+
+                            // 更新UI
+                            Log.d("HomeFragment", "成功添加应用: " + packageName);
+
+                            // 创建并添加应用图标
+                            try {
+                                AppModel appModel = new AppModel(
+                                        app.loadLabel(pm).toString(),
+                                        app.loadIcon(pm),
+                                        packageName
+                                );
+
+                                // 获取目标网格
+                                GridLayout targetGrid = null;
+                                switch (category) {
+                                    case SETTINGS:
+                                        targetGrid = settingsGrid;
+                                        break;
+                                    case OFFICE:
+                                        targetGrid = officeGrid;
+                                        break;
+                                    case APPS:
+                                        targetGrid = appsGrid;
+                                        break;
+                                }
+
+                                if (targetGrid != null) {
+                                    addAppToGrid(appModel, targetGrid, cardKey);
+                                    Toast.makeText(requireContext(), "已添加: " + appModel.getAppName(), Toast.LENGTH_SHORT).show();
+                                }
+                            } catch (Exception e) {
+                                Log.e("HomeFragment", "创建应用图标失败: " + e.getMessage());
+                                e.printStackTrace();
+                            }
+                        }
                     }
 
                     dialog.dismiss();
@@ -753,7 +1275,14 @@ public class HomeFragment extends Fragment {
                     Toast.makeText(requireContext(), "添加应用失败", Toast.LENGTH_SHORT).show();
                 }
             });
+            dialog.setOnDismissListener(dialogInterface -> {
+                // 应用选择器关闭后，刷新父对话框
+                if (parentDialog != null && parentDialog.isShowing()) {
+                    // 关闭当前对话框
+                    parentDialog.dismiss();
 
+                }
+            });
             dialogAppsGrid.addView(appContainer);
         }
 

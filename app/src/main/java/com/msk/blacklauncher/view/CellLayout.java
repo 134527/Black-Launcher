@@ -125,6 +125,33 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         }
     }
 
+    /**
+     * 清除所有单元格但保持布局结构
+     */
+    public void clearCells() {
+        // 清除所有视图
+        removeAllViews();
+
+        // 清除单元格列表但不破坏结构
+        if (cells != null) {
+            cells.clear();
+        } else {
+            cells = new ArrayList<>();
+        }
+
+        // 重置单元格占用状态
+        cellHolds = new boolean[rows][columns];
+
+        Log.d(TAG, "已清除所有单元格");
+    }
+
+    /**
+     * 获取所有单元格
+     */
+    public List<Cell> getCells() {
+        return cells;
+    }
+
     public void addCell(Cell cell) {
         if (cell == null) {
             Log.e(TAG, "尝试添加空单元格");
