@@ -3,52 +3,57 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    >
+    android:background="@android:color/transparent">
 
     <RelativeLayout
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:id="@+id/dateTextView">
+        android:id="@+id/dateTextView"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        app:layout_constraintStart_toStartOf="@id/guidelineStart"
+        app:layout_constraintEnd_toEndOf="@id/guidelineEnd"
+        app:layout_constraintBottom_toBottomOf="@id/guidelineBottom"
+        android:background="@android:color/transparent">
 
         <!-- Timer -->
         <TextView
             android:id="@+id/timerText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_centerHorizontal="true"
-            android:layout_marginTop="50dp"
+            android:layout_marginBottom="20dp"
+            android:layout_marginLeft="16dp"
             android:text="00:00:00"
             android:textColor="#FFFFFF"
-            android:textSize="48sp"
+            android:textSize="90sp"
+            android:textStyle="bold"
             android:textFontWeight="600"
             android:fontFamily="sans-serif"/>
 
         <!-- Date -->
+
         <TextView
             android:id="@+id/dateText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_below="@id/timerText"
-            android:layout_centerHorizontal="true"
-            android:layout_marginTop="16dp"
+            android:layout_marginLeft="16dp"
+            android:layout_marginBottom="120dp"
+            android:fontFamily="sans-serif"
             android:text="YYYY-MM-DD"
             android:textColor="#FFFFFF"
-            android:textSize="24sp"
-            android:fontFamily="sans-serif" />
+            android:textSize="25sp" />
+
         <ImageButton
             android:id="@+id/searchButton"
             android:layout_width="48dp"
             android:layout_height="48dp"
+            android:layout_alignParentEnd="true"
+
+            android:layout_marginTop="16dp"
+            android:layout_marginEnd="16dp"
             android:src="@drawable/launcher_main_search"
             android:scaleType="fitCenter"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:layout_margin="16dp"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"/>
-
-
+            android:background="?attr/selectableItemBackgroundBorderless"/>
     </RelativeLayout>
-    <!-- 搜索按钮 -->
 
     <!-- 参考线 -->
     <androidx.constraintlayout.widget.Guideline
@@ -56,32 +61,32 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        app:layout_constraintGuide_percent="0.35"/>
+        app:layout_constraintGuide_percent="0.33"/>
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guidelineStart"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        app:layout_constraintGuide_percent="0.1"/>
+        app:layout_constraintGuide_percent="0.07"/>
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guidelineEnd"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        app:layout_constraintGuide_percent="0.9"/>
+        app:layout_constraintGuide_percent="0.93"/>
 
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guidelineCenter"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        app:layout_constraintGuide_percent="0.6"/>
+        app:layout_constraintGuide_percent="0.65"/>
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guidelineBottom"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        app:layout_constraintGuide_percent="0.45"/>
+        app:layout_constraintGuide_percent="0.4"/>
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guidelineTop"
         android:layout_width="wrap_content"
@@ -97,38 +102,72 @@
         android:layout_height="0dp"
         android:layout_margin="16dp"
         app:cardCornerRadius="24dp"
-        app:cardBackgroundColor="#4D4D4D"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardElevation="0dp"
         app:layout_constraintStart_toStartOf="@+id/guidelineStart"
         app:layout_constraintEnd_toStartOf="@id/guidelineLeft"
         app:layout_constraintTop_toTopOf="@id/guidelineBottom"
         app:layout_constraintBottom_toBottomOf="@id/guidelineTop">
 
-
-    <RelativeLayout
+        <eightbitlab.com.blurview.BlurView
+            android:id="@+id/tv_card_blur_view"
             android:layout_width="match_parent"
-            android:layout_height="match_parent">
-
-            <ImageView
-
+            android:layout_height="match_parent"
+            app:blurOverlayColor="#33FFFFFF">
+            
+            <RelativeLayout
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:src="@drawable/launcher_main_pattern"
-                android:scaleType="centerCrop"/>
+                android:layout_height="match_parent">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="TV模式"
-            android:textColor="@android:color/white"
-            android:textSize="32sp"
-            android:textStyle="bold"
-            android:gravity="center"
-            android:padding="16dp"
-            android:background="@drawable/blur_text_backgroud"
-            android:layout_alignParentBottom="true"
-            android:layout_centerInParent="true"
-            android:layout_margin="16dp"/>
-        </RelativeLayout>
+                <ImageView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:src="@drawable/launcher_main_pattern"
+                    android:scaleType="centerCrop"/>
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="125dp"
+                    android:layout_alignParentBottom="true"
+                    android:layout_centerInParent="true"
+                    android:layout_margin="16dp"
+                    android:background="@drawable/blur_text_backgroud">
+
+                    <net.center.blurview.ShapeBlurView
+                        android:id="@+id/tv_mode_blur_view"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        app:blur_radius="20sp"
+                        app:blur_down_sample="0.5"
+                        app:blur_overlay_color="#26FFFFFF"
+                        app:blur_corner_radius="24dp"
+                        app:blur_mode="rectangle"/>
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:layout_gravity="center">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="TV模式"
+                            android:textColor="@android:color/white"
+                            android:textSize="42sp"
+                            android:textStyle="bold"/>
+
+                        <ImageView
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:src="@drawable/tag_tv_model_icon"
+                            android:scaleType="fitCenter"
+                            android:layout_marginStart="16dp"/>
+                    </LinearLayout>
+                </FrameLayout>
+            </RelativeLayout>
+        </eightbitlab.com.blurview.BlurView>
     </androidx.cardview.widget.CardView>
 
     <!-- 中间列布局 -->
@@ -149,13 +188,16 @@
         android:layout_weight="1"
 
         android:orientation="horizontal">
-    <!-- 桌面主题卡片 -->
+        <!-- 桌面主题卡片 -->
         <androidx.cardview.widget.CardView
             android:id="@+id/themeCard"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_margin="8dp"
+            android:layout_marginLeft="16dp"
+            android:layout_marginRight="16dp"
+            android:layout_marginBottom="16dp"
+            android:layout_marginTop="8dp"
             app:cardCornerRadius="24dp"
             app:cardBackgroundColor="#FFA500">
 
@@ -165,15 +207,45 @@
                 android:src="@drawable/launcher_wrapper_btn"
                 android:scaleType="centerCrop"/>
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="桌面主题"
-                android:textColor="@android:color/white"
-                android:textSize="16sp"
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="100dp"
+                android:layout_gravity="bottom"
+                >
 
-                android:layout_gravity="bottom|center"
-                android:layout_margin="16dp"/>
+                <net.center.blurview.ShapeBlurView
+                    android:id="@+id/theme_blur_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    app:blur_radius="20sp"
+                    app:blur_down_sample="0.5"
+                    app:blur_overlay_color="#26FFFFFF"
+                    app:blur_mode="rectangle"/>
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:layout_gravity="center">
+                    <ImageView
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:src="@drawable/tag_tv_theme_icon"
+                        android:scaleType="fitCenter"
+                        android:layout_marginStart="16dp"
+                        android:layout_marginEnd="16dp"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="桌面主题"
+                        android:textColor="@android:color/white"
+                        android:textSize="32sp"
+                        android:textStyle="bold"/>
+
+
+                </LinearLayout>
+            </FrameLayout>
         </androidx.cardview.widget.CardView>
 
         <!-- 艺术屏保卡片 -->
@@ -182,7 +254,10 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_margin="8dp"
+            android:layout_marginLeft="16dp"
+            android:layout_marginRight="16dp"
+            android:layout_marginBottom="16dp"
+            android:layout_marginTop="8dp"
             app:cardCornerRadius="24dp"
             app:cardBackgroundColor="#0066CC">
 
@@ -192,14 +267,45 @@
                 android:src="@drawable/launcher_art_btn"
                 android:scaleType="centerCrop"/>
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="艺术屏保"
-                android:textColor="@android:color/white"
-                android:textSize="16sp"
-                android:layout_gravity="bottom|center"
-                android:layout_margin="16dp"/>
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="100dp"
+                android:layout_gravity="bottom"
+                >
+
+                <net.center.blurview.ShapeBlurView
+                    android:id="@+id/screensaver_blur_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    app:blur_radius="20sp"
+                    app:blur_down_sample="0.5"
+                    app:blur_overlay_color="#26FFFFFF"
+                    app:blur_mode="rectangle"/>
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:layout_gravity="center">
+                    <ImageView
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:src="@drawable/tag_art_icon"
+                        android:scaleType="fitCenter"
+                        android:layout_marginStart="16dp"
+                        android:layout_marginEnd="16dp"/>
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="艺术屏保"
+                        android:textColor="@android:color/white"
+                        android:textSize="32sp"
+                        android:textStyle="bold"/>
+
+
+                </LinearLayout>
+            </FrameLayout>
         </androidx.cardview.widget.CardView>
     </LinearLayout>
 
@@ -208,47 +314,56 @@
             android:id="@+id/whiteboardCard"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="0.8"
-            android:layout_margin="8dp"
+            android:layout_weight="0.7"
+            android:layout_marginLeft="16dp"
+            android:layout_marginRight="16dp"
+            android:layout_marginBottom="0dp"
+            android:layout_marginTop="16dp"
             app:cardCornerRadius="24dp"
-            app:cardBackgroundColor="#666666">
-
-            <LinearLayout
+            app:cardBackgroundColor="@android:color/transparent"
+            app:cardElevation="0dp">
+            
+            <eightbitlab.com.blurview.BlurView
+                android:id="@+id/whiteboard_blur_view"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:orientation="horizontal">
-
-                <!-- 左侧图片 -->
-                <ImageView
-                    android:layout_width="0dp"
-                    android:layout_weight="0.3"
+                app:blurOverlayColor="#33FFFFFF">
+                
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:src="@drawable/launcher_drawing_left_icon"
-                    android:scaleType="fitCenter"
-                    android:layout_margin="16dp"/>
+                    android:orientation="horizontal">
 
-                <!-- 中间文字 -->
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="电子白板"
-                    android:textColor="@android:color/white"
-                    android:textSize="30sp"
-                    android:layout_gravity="center"
-                    android:gravity="center"/>
+                    <!-- 左侧图片 -->
+                    <ImageView
+                        android:layout_width="0dp"
+                        android:layout_weight="0.3"
+                        android:layout_height="match_parent"
+                        android:src="@drawable/launcher_drawing_left_icon"
+                        android:scaleType="fitCenter"
+                        android:layout_marginLeft="100dp"/>
 
-                <!-- 右侧图片 -->
-                <ImageView
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:layout_height="match_parent"
-                    android:src="@drawable/launcher_drawing_bg"
-                    android:scaleType="fitCenter"
-                    android:layout_margin="16dp"
-                    android:adjustViewBounds="true"/>
+                    <!-- 中间文字 -->
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="电子白板"
+                        android:textColor="@android:color/white"
+                        android:textSize="36sp"
+                        android:layout_gravity="center"
+                        android:gravity="center"/>
 
-            </LinearLayout>
+                    <!-- 右侧图片 -->
+                    <ImageView
+                        android:layout_width="0dp"
+                        android:layout_weight="2"
+                        android:layout_height="match_parent"
+                        android:src="@drawable/launcher_drawing_bg"
+                        android:layout_marginTop="40dp"
+                        android:layout_marginRight="40dp"/>
+                </LinearLayout>
+            </eightbitlab.com.blurview.BlurView>
         </androidx.cardview.widget.CardView>
     </LinearLayout>
 
@@ -263,67 +378,84 @@
         app:layout_constraintTop_toTopOf="@id/guidelineBottom"
         app:layout_constraintBottom_toBottomOf="@id/guidelineTop">
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="8dp"
+        android:layout_marginLeft="16dp"
+
+
+        android:orientation="horizontal">
     <!-- 基础工具卡片 -->
         <androidx.cardview.widget.CardView
             android:id="@+id/toolsCard"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1.1"
-            android:layout_margin="8dp"
-
+            android:layout_height="match_parent"
+            android:layout_weight="1"
             app:cardCornerRadius="24dp"
-            app:cardBackgroundColor="#808080">
+            app:cardBackgroundColor="@android:color/transparent"
+            app:cardElevation="0dp">
 
-            <LinearLayout
+            <eightbitlab.com.blurview.BlurView
+                android:id="@+id/tools_card_blur_view"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:orientation="vertical"
-                android:padding="16dp">
-
+                app:blurOverlayColor="#33FFFFFF">
+                
                 <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <ImageView
-                        android:layout_width="32dp"
-                        android:layout_height="32dp"
-                        android:src="@drawable/tag_tool_icon"
-                        android:layout_marginEnd="8dp"
-                        android:scaleType="fitCenter"/>
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="基础工具"
-                        android:textColor="@android:color/white"
-                        android:textSize="32sp"/>
-
-                </LinearLayout>
-
-                <HorizontalScrollView
-                    android:id="@+id/basicToolsContainer"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:scrollbars="none">
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:padding="64dp">
 
                     <LinearLayout
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="32dp"
+                            android:layout_height="32dp"
+                            android:layout_marginEnd="8dp"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/tag_tool_icon" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="基础工具"
+                            android:textColor="@android:color/white"
+                            android:textSize="32sp"
+                            android:layout_marginStart="16dp"
+                            android:textStyle="bold"
+                            />
+
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/basicToolsContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:padding="8dp"/>
 
-                </HorizontalScrollView>
-            </LinearLayout>
+                        android:layout_marginTop="36dp"
+                        />
+                </LinearLayout>
+            </eightbitlab.com.blurview.BlurView>
         </androidx.cardview.widget.CardView>
-
+    </LinearLayout>
         <!-- 底部三个卡片 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
+            android:layout_weight="0.8"
+            android:layout_marginLeft="8dp"
+            android:layout_marginTop="24dp"
+
+
 
             android:orientation="horizontal">
 
@@ -342,37 +474,43 @@
                     android:layout_weight="1"
                     android:layout_margin="8dp"
                     app:cardCornerRadius="24dp"
-                    app:cardBackgroundColor="#4D4D4D">
-                    <FrameLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent">
-
-
-                    <ScrollView
+                    app:cardElevation="0dp"
+                    app:cardBackgroundColor="@android:color/transparent">
+                    
+                    <eightbitlab.com.blurview.BlurView
+                        android:id="@+id/settings_card_blur_view"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
-                        android:scrollbars="none">
-                    <GridLayout
-                        android:id="@+id/basicSettingGrid"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:columnCount="3"
-                        android:rowCount="2"
-                        android:padding="9dp">
-
-
-
-                    </GridLayout>
-                    </ScrollView>
-                        <!-- 添加透明遮罩层用于处理点击事件 -->
-                        <com.msk.blacklauncher.view.CardTouchInterceptor
-                            android:id="@+id/settingsCardOverlay"
+                        app:blurOverlayColor="#33FFFFFF">
+                        
+                        <FrameLayout
                             android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:background="@android:color/transparent"
-                            android:clickable="true"
-                            android:focusable="true"/>
-                    </FrameLayout>
+                            android:layout_height="match_parent">
+
+                            <ScrollView
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:scrollbars="none">
+                                <GridLayout
+                                    android:id="@+id/basicSettingGrid"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:columnCount="3"
+                                    android:rowCount="2"
+                                    android:padding="9dp">
+                                </GridLayout>
+                            </ScrollView>
+                            
+                            <!-- 添加透明遮罩层用于处理点击事件 -->
+                            <com.msk.blacklauncher.view.CardTouchInterceptor
+                                android:id="@+id/settingsCardOverlay"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:background="@android:color/transparent"
+                                android:clickable="true"
+                                android:focusable="true"/>
+                        </FrameLayout>
+                    </eightbitlab.com.blurview.BlurView>
                 </androidx.cardview.widget.CardView>
 
                 <TextView
@@ -380,8 +518,8 @@
                     android:layout_height="wrap_content"
                     android:text="基础设置"
                     android:textColor="@android:color/white"
-                    android:textSize="12sp"
-                    android:layout_marginTop="4dp"/>
+                    android:textSize="24sp"
+                    android:layout_marginTop="16dp"/>
             </LinearLayout>
 
             <!-- 办公学习卡片 -->
@@ -399,34 +537,44 @@
                     android:layout_weight="1"
                     android:layout_margin="8dp"
                     app:cardCornerRadius="24dp"
-                    app:cardBackgroundColor="#4D4D4D">
-                    <FrameLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent">
-
-                    <ScrollView
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:scrollbars="none">
-                    <GridLayout
-                        android:id="@+id/officeLearningGrid"
+                    app:cardElevation="0dp"
+                    app:cardBackgroundColor="@android:color/transparent">
+                    
+                    <eightbitlab.com.blurview.BlurView
+                        android:id="@+id/office_card_blur_view"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
-                        android:columnCount="3"
-                        android:rowCount="2"
-                        android:padding="9dp">
-
-                        <!-- 9个应用图标位置 -->
-                    </GridLayout>
-                    </ScrollView>
-                        <com.msk.blacklauncher.view.CardTouchInterceptor
-                            android:id="@+id/officeCardOverlay"
+                        app:blurOverlayColor="#33FFFFFF">
+                        
+                        <FrameLayout
                             android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:background="@android:color/transparent"
-                            android:clickable="true"
-                            android:focusable="true"/>
-                    </FrameLayout>
+                            android:layout_height="match_parent">
+
+                            <ScrollView
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:scrollbars="none">
+                                <GridLayout
+                                    android:id="@+id/officeLearningGrid"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:columnCount="3"
+                                    android:rowCount="2"
+                                    android:padding="9dp">
+
+                                    <!-- 9个应用图标位置 -->
+                                </GridLayout>
+                            </ScrollView>
+                            
+                            <com.msk.blacklauncher.view.CardTouchInterceptor
+                                android:id="@+id/officeCardOverlay"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:background="@android:color/transparent"
+                                android:clickable="true"
+                                android:focusable="true"/>
+                        </FrameLayout>
+                    </eightbitlab.com.blurview.BlurView>
                 </androidx.cardview.widget.CardView>
 
                 <TextView
@@ -434,8 +582,8 @@
                     android:layout_height="wrap_content"
                     android:text="办公学习"
                     android:textColor="@android:color/white"
-                    android:textSize="12sp"
-                    android:layout_marginTop="4dp"/>
+                    android:textSize="24sp"
+                    android:layout_marginTop="16dp"/>
             </LinearLayout>
 
             <!-- 应用宝卡片 -->
@@ -453,33 +601,42 @@
                     android:layout_weight="1"
                     android:layout_margin="8dp"
                     app:cardCornerRadius="24dp"
-                    app:cardBackgroundColor="#4D4D4D">
-                    <FrameLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent">
-
-
-                    <ScrollView
+                    app:cardElevation="0dp"
+                    app:cardBackgroundColor="@android:color/transparent">
+                    
+                    <eightbitlab.com.blurview.BlurView
+                        android:id="@+id/apps_card_blur_view"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
-                        android:scrollbars="none">
+                        app:blurOverlayColor="#33FFFFFF">
+                        
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent">
 
-                        <GridLayout
-                            android:id="@+id/appsGrid"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:columnCount="3"
-                            android:padding="9dp">
-                        </GridLayout>
-                    </ScrollView>
-                        <com.msk.blacklauncher.view.CardTouchInterceptor
-                            android:id="@+id/appsCardOverlay"
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:background="@android:color/transparent"
-                            android:clickable="true"
-                            android:focusable="true"/>
-                    </FrameLayout>
+                            <ScrollView
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:scrollbars="none">
+
+                                <GridLayout
+                                    android:id="@+id/appsGrid"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:columnCount="3"
+                                    android:padding="9dp">
+                                </GridLayout>
+                            </ScrollView>
+                            
+                            <com.msk.blacklauncher.view.CardTouchInterceptor
+                                android:id="@+id/appsCardOverlay"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:background="@android:color/transparent"
+                                android:clickable="true"
+                                android:focusable="true"/>
+                        </FrameLayout>
+                    </eightbitlab.com.blurview.BlurView>
                 </androidx.cardview.widget.CardView>
 
                 <TextView
@@ -487,8 +644,8 @@
                     android:layout_height="wrap_content"
                     android:text="应用宝"
                     android:textColor="@android:color/white"
-                    android:textSize="12sp"
-                    android:layout_marginTop="4dp"/>
+                    android:textSize="24sp"
+                    android:layout_marginTop="16dp"/>
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

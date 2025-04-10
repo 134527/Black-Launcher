@@ -2,4 +2,6 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="selected_card">#FF3366CC</color>
+    <color name="default_card">#FF333333</color>
 </resources>

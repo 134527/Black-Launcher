@@ -8,6 +8,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Point;
+import android.graphics.BlurMaskFilter;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.DragEvent;
@@ -104,25 +105,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
-        // 如果有高亮单元格，绘制高亮效果
-        if (highLightValid && highLightColumn >= 0 && highLightRow >= 0) {
-            Paint paint = new Paint();
-            paint.setColor(Color.argb(80, 0, 150, 255)); // 半透明蓝色
-            paint.setStyle(Paint.Style.FILL);
-
-            float left = highLightColumn * per_cell_width;
-            float top = highLightRow * per_cell_height;
-            float right = left + per_cell_width;
-            float bottom = top + per_cell_height;
-
-            canvas.drawRect(left, top, right, bottom, paint);
-
-            // 添加边框
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setColor(Color.rgb(0, 120, 215));
-            paint.setStrokeWidth(2);
-            canvas.drawRect(left, top, right, bottom, paint);
-        }
+        // 不再在onDraw中绘制高亮效果，已移至dispatchDraw方法
     }
 
     /**
@@ -551,28 +534,41 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
     protected void dispatchDraw(Canvas canvas) {
         super.dispatchDraw(canvas);
 
-        // 只在有效的高亮情况下绘制
-        if (highLightColumn >= 0 && highLightRow >= 0) {
+        // 如果有高亮单元格，绘制应用图标大小的模糊边框
+        if (highLightValid && highLightColumn >= 0 && highLightRow >= 0) {
             Paint paint = new Paint();
-
-            // 始终使用绿色表示可放置，不再使用红色
-            paint.setColor(Color.argb(80, 0, 200, 0));
-            paint.setStyle(Paint.Style.FILL);
-
-            // 计算高亮区域
-            int left = highLightColumn * per_cell_width;
-            int top = highLightRow * per_cell_height;
-            int right = left + per_cell_width;
-            int bottom = top + per_cell_height;
-
-            // 绘制填充
-            canvas.drawRect(left, top, right, bottom, paint);
-
-            // 绘制边框
+            
+            // 计算单元格区域
+            float cellLeft = highLightColumn * per_cell_width;
+            float cellTop = highLightRow * per_cell_height;
+            
+            // 应用图标通常不会占满整个单元格，而是居中显示
+            // 计算图标的大小（通常比单元格小一些）
+            float iconSize = Math.min(per_cell_width, per_cell_height) * 0.7f; // 图标尺寸为单元格的70%
+            
+            // 计算图标居中后的区域
+            float iconLeft = cellLeft + (per_cell_width - iconSize) / 2;
+            float iconTop = cellTop + (per_cell_height - iconSize) / 2;
+            float iconRight = iconLeft + iconSize;
+            float iconBottom = iconTop + iconSize;
+            
+            // 创建模糊效果
+            paint.setColor(Color.WHITE);
             paint.setStyle(Paint.Style.STROKE);
-            paint.setColor(Color.rgb(0, 150, 0));
             paint.setStrokeWidth(2);
-            canvas.drawRect(left, top, right, bottom, paint);
+            
+            // 绘制内边框
+            canvas.drawRect(iconLeft, iconTop, iconRight, iconBottom, paint);
+            
+            // 应用模糊发光效果
+            paint.setColor(Color.argb(100, 150, 200, 255)); // 使用更淡的蓝色
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(5);
+            paint.setMaskFilter(new BlurMaskFilter(15, BlurMaskFilter.Blur.OUTER)); // 添加外部模糊
+            canvas.drawRect(iconLeft, iconTop, iconRight, iconBottom, paint);
+            
+            // 清除模糊效果
+            paint.setMaskFilter(null);
         }
     }
     public static class Cell {

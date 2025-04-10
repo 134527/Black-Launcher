@@ -3,6 +3,15 @@ plugins {
 }
 
 android {
+
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("E:\\JryO\\MT8396\\mtk_platform.jks")
+            keyAlias = "platform"
+            storePassword = "123456"
+            keyPassword = "123456"
+        }
+    }
     namespace = "com.msk.blacklauncher"
     compileSdk = 34
 
@@ -47,6 +56,8 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation(libs.gridlayout)
     implementation ("com.google.code.gson:gson:2.8.7")
+    implementation ("com.github.centerzx:ShapeBlurView:1.0.5")
+    implementation ("com.github.Dimezis:BlurView:version-2.0.3")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)

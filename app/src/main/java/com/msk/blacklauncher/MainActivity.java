@@ -17,6 +17,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.preference.PreferenceManager;
 import android.util.Log;
+import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.TextView;
@@ -29,7 +30,9 @@ import androidx.core.view.WindowInsetsCompat;
 
 // import fragments
 import androidx.viewpager2.widget.ViewPager2;
+import androidx.recyclerview.widget.RecyclerView;
 
+import com.msk.blacklauncher.Utils.FullScreenHelper;
 import com.msk.blacklauncher.adapters.ViewPagerAdapter;
 import com.msk.blacklauncher.fragments.AppsFragment;
 import com.msk.blacklauncher.fragments.ChecklistAndNotesFragment;
@@ -40,6 +43,7 @@ import com.msk.blacklauncher.model.AppModel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.lang.reflect.Field;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -54,7 +58,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
-        setContentView(R.layout.activity_main);
+        FullScreenHelper.setFullScreen(this);
 
         // 设置全屏和透明状态栏
         getWindow().setFlags(
@@ -62,19 +66,33 @@ public class MainActivity extends AppCompatActivity {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
         );
 
+        // 让系统壁纸显示在Activity背景
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
 
-        // 设置窗口背景为透明
+        // 设置窗口背景为透明，以便能够显示系统壁纸
         getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-
+        
+        // 加载视图布局
         setContentView(R.layout.activity_main);
-
+        
+        // 获取壁纸并设置到根布局
+        WallpaperManager wallpaperManager = WallpaperManager.getInstance(this);
+        Drawable wallpaperDrawable = wallpaperManager.getDrawable();
+        
+        // 获取Activity的根布局
+        View decorView = getWindow().getDecorView();
+        View rootView = decorView.findViewById(android.R.id.content);
+        // 将壁纸设置为根布局的背景
+        rootView.setBackground(wallpaperDrawable);
+        
+        // 获取ViewPager并设置其背景为透明
+        ViewPager2 viewPager = findViewById(R.id.viewPager);
+        viewPager.setBackgroundColor(Color.TRANSPARENT);
 
         mAppWidgetManager = AppWidgetManager.getInstance(getApplicationContext());
         mAppWidgetHost = new AppWidgetHost(getApplicationContext(), 0xfffff);
         //开始监听widget的变化
         mAppWidgetHost.startListening();
-        ViewPager2 viewPager = findViewById(R.id.viewPager);
 
         ViewPagerAdapter adapter = new ViewPagerAdapter(getSupportFragmentManager(), getLifecycle());
 
@@ -92,8 +110,39 @@ public class MainActivity extends AppCompatActivity {
         adapter.addFragment(new HomeFragment()); // Add your home fragment here
 //        adapter.addFragment(new AppsFragment()); // Add apps list fragment here
         adapter.addFragment(new WorkspaceFragment());
+        
+        // 禁用ViewPager2的页面转换动画，使背景保持不动
+        viewPager.setPageTransformer(null);
+        
+        // 消除页面之间的间距
+        viewPager.setOffscreenPageLimit(2);
+        
+        // 应用自定义页面转换效果，保持背景不动
+        viewPager.setPageTransformer((page, position) -> {
+            // 不对页面应用任何变换效果
+            page.setAlpha(1.0f);
+        });
+        
         viewPager.setAdapter(adapter);
         viewPager.setCurrentItem(0);
+        
+        // 更改ViewPager2的相关设置，移除默认的滑动效果
+        try {
+            Field recyclerViewField = ViewPager2.class.getDeclaredField("mRecyclerView");
+            recyclerViewField.setAccessible(true);
+            RecyclerView recyclerView = (RecyclerView) recyclerViewField.get(viewPager);
+            
+            // 移除默认的item装饰和divider
+            if (recyclerView != null && recyclerView.getItemDecorationCount() > 0) {
+                recyclerView.removeItemDecorationAt(0);
+            }
+            
+            // 应用无分隔特效的简单动画
+            recyclerView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        } catch (Exception e) {
+            Log.e("MainActivity", "设置ViewPager2属性失败: " + e.getMessage());
+        }
+
         // 注册 Home 键监听
         getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(visibility -> {
             // 当从其他应用返回时，确保回到首页
@@ -159,6 +208,13 @@ public class MainActivity extends AppCompatActivity {
 
         return appsList;
     }
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // 保持全屏模式
+        FullScreenHelper.maintainFullScreen(this, hasFocus);
+    }
+
     // 添加 onResume 方法来处理从后台返回
     @Override
     protected void onResume() {

@@ -27,6 +27,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.app.WallpaperManager;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -41,6 +42,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.Expose;
 import com.google.gson.reflect.TypeToken;
 import com.msk.blacklauncher.R;
+import com.msk.blacklauncher.Utils.IconUtils;
 import com.msk.blacklauncher.adapters.WorkspacePagerAdapter;
 import com.msk.blacklauncher.model.AppModel;
 import com.msk.blacklauncher.view.CellLayout;
@@ -57,7 +59,7 @@ import java.util.List;
     private static final String APP_POSITIONS_KEY = "AppPositions";
 //    private static final int PAGE_COUNT = 2; // 默认页数
     private static final int COLUMNS = 9;
-    private static final int ROWS = 5;
+    private static final int ROWS = 4;
 
     private ViewPager2 workspacePager;
     private LinearLayout pageIndicator;
@@ -192,27 +194,26 @@ import java.util.List;
              // 保存新的应用位置
              saveAppPositions();
 
-             // 更新UI - 使用更精确的通知方式
+             // 只通知修改的页面变化，而不是整个适配器
              if (workspacePager.getAdapter() != null) {
-                 // 先通知数据集变化
+                 // 只通知特定页面变化
                  workspacePager.getAdapter().notifyItemChanged(pageIndex);
 
-                 // 确保在主线程上立即更新
-                 new Handler(Looper.getMainLooper()).post(() -> {
-                     // 如果当前显示的是该页面，立即更新
-                     if (workspacePager.getCurrentItem() == pageIndex) {
+                 // 如果当前显示的是该页面，立即更新
+                 if (workspacePager.getCurrentItem() == pageIndex) {
+                     new Handler(Looper.getMainLooper()).post(() -> {
                          setupWorkspacePage(pageIndex);
-                     }
-                 });
+                     });
+                 }
              }
 
-             Log.d(TAG, "已添加应用到工作区: " + app.getAppName() + ", 页面: " + pageIndex + ", 位置: " + positionInPage);
+             Log.d(TAG, "已添加应用到工作区: " + app.getAppName());
          } catch (Exception e) {
              Log.e(TAG, "添加应用到工作区失败", e);
          }
      }
 
-     public void removeAppFromWorkspace(String packageName) {
+     public void removeAppFromWorkspace(String packageName)  {
          boolean removed = false;
          int removedPageIndex = -1;
 
@@ -222,14 +223,14 @@ import java.util.List;
              for (int positionInPage = 0; positionInPage < page.size(); positionInPage++) {
                  CellLayout.Cell cell = page.get(positionInPage);
                  if (cell.getTag().equals(packageName)) {
-                     // 替换为空单元格
+                     // 替换为空单元格，保持结构不变
                      View emptyView = new View(getContext());
                      emptyView.setVisibility(View.INVISIBLE);
                      CellLayout.Cell emptyCell = new CellLayout.Cell("empty", emptyView);
                      page.set(positionInPage, emptyCell);
                      removed = true;
                      removedPageIndex = pageIndex;
-                     Log.d(TAG, "已从工作区移除应用: " + packageName + ", 页面: " + pageIndex + ", 位置: " + positionInPage);
+                     Log.d(TAG, "已从工作区移除应用: " + packageName);
                      break;
                  }
              }
@@ -239,25 +240,20 @@ import java.util.List;
          if (removed) {
              final int updatedPageIndex = removedPageIndex;
 
-             // 检查是否有空页面可以移除
-             checkAndRemoveEmptyPages();
-
              // 保存新的应用位置
              saveAppPositions();
 
-             // 更新UI - 使用更精确的通知方式
+             // 只更新需要更改的页面
              if (workspacePager.getAdapter() != null) {
-                 // 首先通知数据变化
-                 workspacePager.getAdapter().notifyDataSetChanged();
+                 // 只通知特定页面变化
+                 workspacePager.getAdapter().notifyItemChanged(updatedPageIndex);
 
-                 // 确保在主线程上立即更新
-                 new Handler(Looper.getMainLooper()).post(() -> {
-                     // 如果被移除的页面仍然存在，并且当前显示的是该页面，立即更新
-                     if (updatedPageIndex >= 0 && updatedPageIndex < workspaceCells.size() &&
-                             workspacePager.getCurrentItem() == updatedPageIndex) {
+                 // 如果当前显示的是该页面，立即更新
+                 if (workspacePager.getCurrentItem() == updatedPageIndex) {
+                     new Handler(Looper.getMainLooper()).post(() -> {
                          setupWorkspacePage(updatedPageIndex);
-                     }
-                 });
+                     });
+                 }
              }
          }
      }
@@ -424,7 +420,7 @@ import java.util.List;
                              workspacePager.setCurrentItem(targetPage, true);
                          }
                      } else if (workspaceCells.size() < 5) {
-                         // 创建新页面
+                          // 创建新页面
                          List<CellLayout.Cell> newPage = createEmptyPage();
                          newPage.set(0, overflowCell);
                          workspaceCells.add(newPage);
@@ -553,17 +549,33 @@ import java.util.List;
          }
      }
 
-     private void setupWorkspacePage(int pageIndex){
+     private void setupWorkspacePage(int pageIndex) {
          if (pageIndex < 0 || pageIndex >= workspaceCells.size()) {
-             Log.e(TAG, "无效的页面索引: " + pageIndex);
+             Log.e(TAG, "尝试设置无效页面: " + pageIndex);
              return;
          }
 
-         Log.d(TAG, "设置工作区页面: " + pageIndex);
+         try {
+             // 获取当前页面的视图
+             View pageView = workspacePager.findViewWithTag("page_" + pageIndex);
+             if (pageView != null) {
+                 CellLayout cellLayout = pageView.findViewById(R.id.workspace_grid);
+                 if (cellLayout != null) {
+                     // 清除所有视图但保持结构
+                     cellLayout.removeAllViews();
 
-         // 使用适配器直接更新该页，不再手动查找页面视图
-         if (workspacePager != null && workspacePager.getAdapter() != null) {
-             workspacePager.getAdapter().notifyItemChanged(pageIndex);
+                     // 保持原有单元格顺序重新添加
+                     List<CellLayout.Cell> pageCells = workspaceCells.get(pageIndex);
+                     for (int i = 0; i < pageCells.size(); i++) {
+                         CellLayout.Cell cell = pageCells.get(i);
+                         if (cell != null && cell.getContentView() != null) {
+                             cellLayout.addCell(cell);
+                         }
+                     }
+                 }
+             }
+         } catch (Exception e) {
+             Log.e(TAG, "设置工作区页面时出错: " + pageIndex, e);
          }
      }
    private List<List<CellLayout.Cell>> initializeWorkspaceApps() {
@@ -824,30 +836,24 @@ import java.util.List;
 
          Log.d(TAG, "创建应用图标: " + app.getAppName() + ", 包名: " + app.getPackageName());
 
+         // 设置图标大小
+         ViewGroup.LayoutParams iconParams = iconView.getLayoutParams();
+         iconParams.width = 180; // 恢复到原来的宽度
+         iconParams.height = 180; // 恢复到原来的高度
+         iconView.setLayoutParams(iconParams);
+
          // 设置图标
-         if (app.getAppIcon() != null) {
-             iconView.setImageDrawable(app.getAppIcon());
-         } else {
-             iconView.setImageResource(android.R.drawable.sym_def_app_icon);
-         }
+         IconUtils.setRoundedIcon(requireContext(), iconView, app.getAppIcon() != null ?
+                 app.getAppIcon() : getResources().getDrawable(android.R.drawable.sym_def_app_icon), 32f);
 
-         // 设置文本内容
-         labelView.setText(app.getAppName());
-
-         // 确保所有视图可见
-         appView.setVisibility(View.VISIBLE);
-         iconView.setVisibility(View.VISIBLE);
+         // 显示文字标签
          labelView.setVisibility(View.VISIBLE);
-
-         // 设置文本显示属性
+         // 设置文本样式
+         labelView.setTextColor(Color.WHITE);
+         labelView.setTextSize(12);
+         labelView.setGravity(Gravity.CENTER);
          labelView.setMaxLines(1);
-         labelView.setGravity(android.view.Gravity.CENTER);
-         labelView.setEllipsize(android.text.TextUtils.TruncateAt.END);
-
-         // 使用延迟来确保文本视图正确显示
-         appView.post(() -> {
-             labelView.setVisibility(View.VISIBLE);
-         });
+         labelView.setEllipsize(TextUtils.TruncateAt.END);
 
          // 设置点击监听器
          appView.setOnClickListener(v -> {
@@ -865,6 +871,25 @@ import java.util.List;
          return appView;
      }
 
+     @Override
+     public void onResume() {
+         super.onResume();
 
+         // 在恢复时刷新当前页面，确保文本显示正确
+         if (workspacePager != null && workspaceCells != null && !workspaceCells.isEmpty()) {
+             int currentPage = workspacePager.getCurrentItem();
+             if (currentPage >= 0 && currentPage < workspaceCells.size()) {
+                 setupWorkspacePage(currentPage);
+
+                 // 延迟进一步刷新，确保视图完全加载
+                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                     if (isAdded() && !isDetached()) {
+                         setupWorkspacePage(currentPage);
+                         workspacePager.invalidate();
+                     }
+                 }, 300);
+             }
+         }
+     }
 
 }

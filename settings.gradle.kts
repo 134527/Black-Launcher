@@ -14,6 +14,9 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+
+
+        maven { url = uri("https://jitpack.io") }
         gradlePluginPortal()
         google()
         mavenCentral()
@@ -23,4 +26,5 @@ dependencyResolutionManagement {
 enableFeaturePreview("VERSION_CATALOGS")
 rootProject.name = "Black Launcher"
 include(":app")
+include (":library")
  
