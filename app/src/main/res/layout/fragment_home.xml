@@ -137,7 +137,7 @@
                         android:id="@+id/tv_mode_blur_view"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
-                        app:blur_radius="20sp"
+                        app:blur_radius="25dp"
                         app:blur_down_sample="0.5"
                         app:blur_overlay_color="#26FFFFFF"
                         app:blur_corner_radius="24dp"

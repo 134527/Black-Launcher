@@ -838,22 +838,25 @@ import java.util.List;
 
          // 设置图标大小
          ViewGroup.LayoutParams iconParams = iconView.getLayoutParams();
-         iconParams.width = 180; // 恢复到原来的宽度
-         iconParams.height = 180; // 恢复到原来的高度
+         iconParams.width = 120; // 恢复到原来的宽度
+         iconParams.height = 120; // 恢复到原来的高度
          iconView.setLayoutParams(iconParams);
 
          // 设置图标
          IconUtils.setRoundedIcon(requireContext(), iconView, app.getAppIcon() != null ?
-                 app.getAppIcon() : getResources().getDrawable(android.R.drawable.sym_def_app_icon), 32f);
+                 app.getAppIcon() : getResources().getDrawable(android.R.drawable.sym_def_app_icon), 64f);
 
          // 显示文字标签
          labelView.setVisibility(View.VISIBLE);
          // 设置文本样式
          labelView.setTextColor(Color.WHITE);
-         labelView.setTextSize(12);
+         labelView.setTextSize(20);
+         labelView.setPadding(0,16,0,0);
          labelView.setGravity(Gravity.CENTER);
-         labelView.setMaxLines(1);
-         labelView.setEllipsize(TextUtils.TruncateAt.END);
+         labelView.setMaxLines(2);
+
+         // 设置应用名称
+         labelView.setText(app.getAppName());
 
          // 设置点击监听器
          appView.setOnClickListener(v -> {
