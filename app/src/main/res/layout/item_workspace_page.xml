@@ -3,13 +3,33 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/workspace_page"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
 
     <!-- 使用 CellLayout 替代 GridLayout 以获得更好的单元格管理 -->
     <com.msk.blacklauncher.view.CellLayout
         android:id="@+id/workspace_grid"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:padding="16dp" />
+        android:padding="16dp"
+        android:clipChildren="false"
+        android:clipToPadding="false" />
+        
+    <!-- 拖拽接收区域指示器 - 当拖拽时显示 -->
+    <View
+        android:id="@+id/drag_indicator_left"
+        android:layout_width="40dp"
+        android:layout_height="match_parent"
+        android:layout_alignParentStart="true"
+        android:background="#33FFFFFF"
+        android:visibility="gone" />
+        
+    <View
+        android:id="@+id/drag_indicator_right"
+        android:layout_width="40dp"
+        android:layout_height="match_parent"
+        android:layout_alignParentEnd="true"
+        android:background="#33FFFFFF"
+        android:visibility="gone" />
 
 </RelativeLayout>

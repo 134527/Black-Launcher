@@ -29,6 +29,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 // import fragments
+import androidx.fragment.app.Fragment;
 import androidx.viewpager2.widget.ViewPager2;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -125,6 +126,22 @@ public class MainActivity extends AppCompatActivity {
         
         viewPager.setAdapter(adapter);
         viewPager.setCurrentItem(0);
+        
+        // 添加页面切换监听器
+        viewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+            @Override
+            public void onPageSelected(int position) {
+                super.onPageSelected(position);
+                
+                // 通知当前Fragment更新指示器
+                Fragment currentFragment = getSupportFragmentManager().findFragmentByTag("f" + position);
+                if (currentFragment instanceof HomeFragment) {
+                    ((HomeFragment) currentFragment).updatePageIndicator(position);
+                } else if (currentFragment instanceof WorkspaceFragment) {
+                    ((WorkspaceFragment) currentFragment).updatePageIndicator(position);
+                }
+            }
+        });
         
         // 更改ViewPager2的相关设置，移除默认的滑动效果
         try {

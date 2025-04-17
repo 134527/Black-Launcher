@@ -36,6 +36,11 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
     private int highLightColumn = -1;
     private int highLightRow = -1;
     private boolean highLightValid = false;
+    private float lastDragX = -1;
+    private float lastDragY = -1;
+    private boolean isDragging = false;
+    private long lastDragEventTime = 0;
+    private static final long DRAG_FEEDBACK_INTERVAL = 200; // ms
 
     public CellLayout(Context context) {
         this(context, null);
@@ -74,31 +79,40 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     new ClipData.Item(cell.getTag())
             );
 
-            View.DragShadowBuilder shadowBuilder = new View.DragShadowBuilder(contentView);
+            View.DragShadowBuilder shadowBuilder = new View.DragShadowBuilder(contentView) {
+                @Override
+                public void onProvideShadowMetrics(Point outShadowSize, Point outShadowTouchPoint) {
+                    super.onProvideShadowMetrics(outShadowSize, outShadowTouchPoint);
+                    // 调整拖拽阴影的触摸点为中心
+                    outShadowTouchPoint.set(outShadowSize.x / 2, outShadowSize.y / 2);
+                }
+                
+                @Override
+                public void onDrawShadow(Canvas canvas) {
+                    // 设置拖拽时的阴影半透明
+                    canvas.save();
+                    canvas.scale(0.8f, 0.8f, canvas.getWidth()/2f, canvas.getHeight()/2f);
+                    super.onDrawShadow(canvas);
+                    canvas.restore();
+                }
+            };
 
+            // 设置拖拽标志
+            isDragging = true;
+            
             // 开始拖拽操作
             contentView.startDragAndDrop(
                     dragData,
                     shadowBuilder,
                     cell, // 传递Cell对象作为本地状态
-                    0
+                    View.DRAG_FLAG_OPAQUE
             );
 
-            // 这里不设置Alpha值，以避免问题
-            // contentView.setAlpha(0.5f);
+            // 临时隐藏原视图
+            contentView.setVisibility(View.INVISIBLE);
 
             return true;
         });
-
-        // 移除这个监听器以避免冲突
-    /*
-    contentView.setOnDragListener((v, event) -> {
-        if (event.getAction() == DragEvent.ACTION_DRAG_ENDED) {
-            contentView.setAlpha(1.0f);
-        }
-        return false;
-    });
-    */
     }
 
     @Override
@@ -344,20 +358,37 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
 
         switch (event.getAction()) {
             case DragEvent.ACTION_DRAG_STARTED:
+                lastDragX = -1;
+                lastDragY = -1;
                 return true;
 
             case DragEvent.ACTION_DRAG_ENTERED:
+                // 进入当前视图区域时触发震动反馈
+                if (getContext() != null) {
+                    performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                }
                 return true;
 
             case DragEvent.ACTION_DRAG_LOCATION:
+                // 减少刷新频率，避免过度绘制
+                long currentTime = System.currentTimeMillis();
+                if (currentTime - lastDragEventTime < DRAG_FEEDBACK_INTERVAL) {
+                    return true;
+                }
+                lastDragEventTime = currentTime;
+                
                 // 计算当前悬停位置对应的单元格
                 int column = Math.min(columns - 1, Math.max(0, (int)(event.getX() / per_cell_width)));
                 int row = Math.min(rows - 1, Math.max(0, (int)(event.getY() / per_cell_height)));
 
-                highLightColumn = column;
-                highLightRow = row;
-                highLightValid = true;  // 设置为可放置
-                invalidate();
+                // 如果位置发生变化，才更新UI
+                if (column != highLightColumn || row != highLightRow) {
+                    highLightColumn = column;
+                    highLightRow = row;
+                    highLightValid = true;  // 设置为可放置
+                    invalidate();
+                }
+                
                 return true;
 
             case DragEvent.ACTION_DRAG_EXITED:
@@ -366,12 +397,9 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                 return true;
 
             case DragEvent.ACTION_DROP:
-                if (dragCellIndex < 0) {
+                if (dragCellIndex < 0 && dragCell == null) {
                     Log.e(TAG, "拖拽索引无效: " + dragCellIndex);
-                    highLightColumn = -1;
-                    highLightRow = -1;
-                    highLightValid = false;
-                    invalidate();
+                    resetHighlight();
                     return false;
                 }
 
@@ -382,17 +410,31 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
 
                 // 确保目标索引有效
                 if (targetIndex >= 0 && targetIndex < cells.size()) {
-                    Cell targetCell = cells.get(targetIndex);
+                    // 处理源位于当前页面的情况
+                    if (dragCellIndex >= 0) {
+                        Cell targetCell = cells.get(targetIndex);
 
-                    // 判断目标单元格类型并采用不同处理方式
-                    if (targetCell.getTag().equals("empty")) {
-                        // 空白单元格 - 直接交换位置
-                        swapCells(dragCellIndex, targetIndex);
-                        Log.d(TAG, "将应用图标与空白单元格交换: " + dragCellIndex + " <-> " + targetIndex);
-                    } else {
-                        // 非空单元格 - 插入并移动
-                        moveCells(dragCellIndex, targetIndex);
-                        Log.d(TAG, "将应用图标移动至非空单元格: " + dragCellIndex + " -> " + targetIndex);
+                        // 判断目标单元格类型并采用不同处理方式
+                        if (targetCell.getTag().equals("empty")) {
+                            // 空白单元格 - 直接交换位置
+                            swapCells(dragCellIndex, targetIndex);
+                            Log.d(TAG, "将应用图标与空白单元格交换: " + dragCellIndex + " <-> " + targetIndex);
+                        } else {
+                            // 非空单元格 - 插入并移动
+                            moveCells(dragCellIndex, targetIndex);
+                            Log.d(TAG, "将应用图标移动至非空单元格: " + dragCellIndex + " -> " + targetIndex);
+                        }
+                    } else if (dragCell != null) {
+                        // 处理源可能来自不同页面的情况
+                        if (dragCell != null && cellOverflowListener != null) {
+                            Cell targetCell = cells.get(targetIndex);
+                            cellOverflowListener.onCellSwapped(dragCell, -1, -1, targetColumn, targetRow);
+                        }
+                    }
+                    
+                    // 通知更新保存位置
+                    if (cellOverflowListener != null) {
+                        cellOverflowListener.saveAppPositions();
                     }
                 }
 
@@ -403,10 +445,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                 }
 
                 // 重置高亮状态
-                highLightColumn = -1;
-                highLightRow = -1;
-                highLightValid = false;
-                invalidate();
+                resetHighlight();
                 return true;
 
             case DragEvent.ACTION_DRAG_ENDED:
@@ -416,11 +455,11 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     dragCell.getContentView().setVisibility(View.VISIBLE);
                 }
 
+                // 重置拖拽标志
+                isDragging = false;
+                
                 // 重置高亮状态
-                highLightColumn = -1;
-                highLightRow = -1;
-                highLightValid = false;
-                invalidate();
+                resetHighlight();
                 return true;
         }
 
@@ -542,15 +581,19 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
             float cellLeft = highLightColumn * per_cell_width;
             float cellTop = highLightRow * per_cell_height;
             
-            // 应用图标通常不会占满整个单元格，而是居中显示
-            // 计算图标的大小（通常比单元格小一些）
-            float iconSize = Math.min(per_cell_width, per_cell_height) * 0.7f; // 图标尺寸为单元格的70%
+            // 计算图标的大小（比单元格略小）
+            float iconSize = Math.min(per_cell_width, per_cell_height) * 0.8f;
             
             // 计算图标居中后的区域
             float iconLeft = cellLeft + (per_cell_width - iconSize) / 2;
             float iconTop = cellTop + (per_cell_height - iconSize) / 2;
             float iconRight = iconLeft + iconSize;
             float iconBottom = iconTop + iconSize;
+            
+            // 绘制半透明背景
+            paint.setColor(Color.argb(50, 255, 255, 255));
+            paint.setStyle(Paint.Style.FILL);
+            canvas.drawRect(iconLeft, iconTop, iconRight, iconBottom, paint);
             
             // 创建模糊效果
             paint.setColor(Color.WHITE);
@@ -561,10 +604,10 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
             canvas.drawRect(iconLeft, iconTop, iconRight, iconBottom, paint);
             
             // 应用模糊发光效果
-            paint.setColor(Color.argb(100, 150, 200, 255)); // 使用更淡的蓝色
+            paint.setColor(Color.argb(180, 150, 200, 255));
             paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(5);
-            paint.setMaskFilter(new BlurMaskFilter(15, BlurMaskFilter.Blur.OUTER)); // 添加外部模糊
+            paint.setStrokeWidth(6); 
+            paint.setMaskFilter(new BlurMaskFilter(15, BlurMaskFilter.Blur.OUTER));
             canvas.drawRect(iconLeft, iconTop, iconRight, iconBottom, paint);
             
             // 清除模糊效果
@@ -683,9 +726,31 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         /**
          * 当 CellLayout 无法为 Cell 找到足够空间时调用
          * @param overflowCell 无法放置的Cell
+         * @param pageIndex 当前页面索引
          * @return 如果返回true，表示已处理溢出；如果返回false，CellLayout将移除此Cell
          */
-        boolean onCellOverflow(Cell overflowCell);
+        boolean onCellOverflow(Cell overflowCell, int pageIndex);
+        
+        /**
+         * 当单元格交换时调用
+         * @param draggingCell 被拖动的单元格
+         * @param fromPage 源页面索引
+         * @param toPage 目标页面索引
+         * @param targetColumn 目标列
+         * @param targetRow 目标行
+         */
+        void onCellSwapped(Cell draggingCell, int fromPage, int toPage, int targetColumn, int targetRow);
+        
+        /**
+         * 保存所有应用位置
+         */
+        void saveAppPositions();
+        
+        /**
+         * 设置工作区页面
+         * @param pageIndex 页面索引
+         */
+        void setupWorkspacePage(int pageIndex);
     }
 
     private OnCellOverflowListener cellOverflowListener;

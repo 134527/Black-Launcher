@@ -50,6 +50,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.cardview.widget.CardView;
 import androidx.fragment.app.Fragment;
+import androidx.viewpager2.widget.ViewPager2;
 
 import com.msk.blacklauncher.R;
 import com.msk.blacklauncher.SettingsActivity;
@@ -59,6 +60,7 @@ import com.msk.blacklauncher.Utils.IconUtils;
 import com.msk.blacklauncher.activities.ScreensaverActivity;
 import com.msk.blacklauncher.model.AppModel;
 import com.msk.blacklauncher.view.CardTouchInterceptor;
+import com.msk.blacklauncher.view.PageIndicator;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
@@ -90,6 +92,9 @@ public class HomeFragment extends Fragment {
     private CardView settingsCardView;
     private CardView officeCardView;
     private CardView appsCardView;
+    private com.msk.blacklauncher.view.PageIndicator pageIndicator;
+    private ViewPager2 mainViewPager;
+    private ViewPager2.OnPageChangeCallback pageChangeCallback;
 
     private LinearLayout basicToolsGrid;
     private GridLayout settingsGrid;
@@ -113,11 +118,12 @@ public class HomeFragment extends Fragment {
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         view = inflater.inflate(R.layout.fragment_home, container, false);
         
-        // 不再单独设置壁纸背景，使用透明背景
-        // 移除以下代码
-        // WallpaperManager wallpaperManager = WallpaperManager.getInstance(requireContext());
-        // Drawable wallpaperDrawable = wallpaperManager.getDrawable();
-        // view.setBackground(wallpaperDrawable);
+        // 初始化ViewPager2
+        mainViewPager = requireActivity().findViewById(R.id.viewPager);
+        
+        // 初始化页面指示器
+        pageIndicator = view.findViewById(R.id.home_page_indicator);
+        initPageIndicator();
 
         // Initialize views
         timeTextView = view.findViewById(R.id.timerText);
@@ -935,6 +941,13 @@ public class HomeFragment extends Fragment {
         if (appUpdateReceiver != null) {
             requireActivity().unregisterReceiver(appUpdateReceiver);
         }
+        // 注销ViewPager2回调
+        if (mainViewPager != null && pageChangeCallback != null) {
+            mainViewPager.unregisterOnPageChangeCallback(pageChangeCallback);
+        }
+        
+        // 清理所有对话框
+        closeAllDialogs();
     }
 
     private class AppUpdateReceiver extends BroadcastReceiver {
@@ -1696,6 +1709,27 @@ public class HomeFragment extends Fragment {
             }
         } catch (Exception e) {
             Log.e("HomeFragment", "关闭对话框出错: " + e.getMessage());
+        }
+    }
+
+    private void initPageIndicator() {
+        if (pageIndicator == null || !isAdded()) {
+            return;
+        }
+
+        // 手动设置页面指示器 - 总共2页，当前是第0页（索引从0开始）
+        Log.d("HomeFragment", "设置全局页面指示器: 总页数=2, 当前页=0");
+        pageIndicator.setupManually(2, 0); // 总共2页，当前是第一页(索引0)
+    }
+
+    /**
+     * 更新页面指示器状态
+     * @param currentPage 当前页面位置
+     */
+    public void updatePageIndicator(int currentPage) {
+        if (pageIndicator != null) {
+            Log.d("HomeFragment", "更新页面指示器位置: " + currentPage);
+            pageIndicator.setCurrentPage(currentPage);
         }
     }
 }

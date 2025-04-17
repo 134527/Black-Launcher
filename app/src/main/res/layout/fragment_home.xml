@@ -44,8 +44,8 @@
 
         <ImageButton
             android:id="@+id/searchButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
             android:layout_alignParentEnd="true"
 
             android:layout_marginTop="16dp"
@@ -93,6 +93,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         app:layout_constraintGuide_percent="0.85"/>
+
 
 
     <!-- TV模式卡片 -->
@@ -205,7 +206,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:src="@drawable/launcher_wrapper_btn"
-                android:scaleType="centerCrop"/>
+                android:scaleType="centerCrop"
+                />
 
             <FrameLayout
                 android:layout_width="match_parent"
@@ -337,7 +339,7 @@
                     <!-- 左侧图片 -->
                     <ImageView
                         android:layout_width="0dp"
-                        android:layout_weight="0.3"
+                        android:layout_weight="0.5"
                         android:layout_height="match_parent"
                         android:src="@drawable/launcher_drawing_left_icon"
                         android:scaleType="fitCenter"
@@ -518,7 +520,7 @@
                     android:layout_height="wrap_content"
                     android:text="基础设置"
                     android:textColor="@android:color/white"
-                    android:textSize="24sp"
+                    android:textSize="30sp"
                     android:layout_marginTop="16dp"/>
             </LinearLayout>
 
@@ -582,7 +584,7 @@
                     android:layout_height="wrap_content"
                     android:text="办公学习"
                     android:textColor="@android:color/white"
-                    android:textSize="24sp"
+                    android:textSize="30sp"
                     android:layout_marginTop="16dp"/>
             </LinearLayout>
 
@@ -644,10 +646,24 @@
                     android:layout_height="wrap_content"
                     android:text="应用宝"
                     android:textColor="@android:color/white"
-                    android:textSize="24sp"
+                    android:textSize="30sp"
                     android:layout_marginTop="16dp"/>
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
-
+    <!-- 添加页面指示器 -->
+    <com.msk.blacklauncher.view.PageIndicator
+        android:id="@+id/home_page_indicator"
+        android:layout_width="0dp"
+        android:layout_height="48dp"
+        android:minHeight="48dp"
+        android:layout_marginTop="8dp"
+        app:layout_constraintStart_toStartOf="@id/guidelineStart"
+        app:layout_constraintEnd_toEndOf="@id/guidelineEnd"
+        app:layout_constraintTop_toTopOf="@id/guidelineTop"
+        app:dotRadius="6dp"
+        app:dotSpacing="8dp"
+        app:dotMarginStart="16dp"
+        app:selectedColor="@android:color/white"
+        app:unselectedColor="#50FFFFFF" />
 </androidx.constraintlayout.widget.ConstraintLayout>
