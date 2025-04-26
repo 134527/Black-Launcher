@@ -3,10 +3,7 @@ package com.msk.blacklauncher;
 import android.app.WallpaperManager;
 import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetManager;
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -15,10 +12,12 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.preference.PreferenceManager;
 import android.util.Log;
+import android.view.MotionEvent;
 import android.view.View;
-import android.view.WindowInsets;
+import android.view.Window;
 import android.view.WindowManager;
 import android.widget.TextView;
 
@@ -30,10 +29,12 @@ import androidx.core.view.WindowInsetsCompat;
 
 // import fragments
 import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
+import androidx.fragment.app.FragmentTransaction;
 import androidx.viewpager2.widget.ViewPager2;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.msk.blacklauncher.Utils.FullScreenHelper;
+import com.msk.blacklauncher.utils.FullScreenHelper;
 import com.msk.blacklauncher.adapters.ViewPagerAdapter;
 import com.msk.blacklauncher.fragments.AppsFragment;
 import com.msk.blacklauncher.fragments.ChecklistAndNotesFragment;
@@ -48,10 +49,16 @@ import java.lang.reflect.Field;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String TAG = "MainActivity";
+    private static final long HIDE_UI_DELAY_MS = 100; // 延迟隐藏UI的时间（毫秒）
+    private static final int[] RECURSIVE_DELAYS = new int[]{100, 200, 300, 500, 800, 1500, 3000};
+    
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable hideSystemUIRunnable = this::hideSystemUI;
+
     private TextView timeTextView, dateTextView;
     private ViewPager2 viewPager;
     private ViewPagerAdapter adapter;
-    private Handler handler = new Handler();
     private AppWidgetHost mAppWidgetHost;
     private AppWidgetManager mAppWidgetManager;
 
@@ -60,6 +67,11 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         FullScreenHelper.setFullScreen(this);
+
+        // 设置全屏
+        requestWindowFeature(Window.FEATURE_NO_TITLE);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, 
+                             WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
         // 设置全屏和透明状态栏
         getWindow().setFlags(
@@ -179,6 +191,17 @@ public class MainActivity extends AppCompatActivity {
 
         // Replace "custom_font.ttf" with the actual font file in the assets folder
 //        FontOverride.setDefaultFont(this, "DEFAULT", "fonts/caveat.ttf");
+
+        // 设置全局触摸监听，确保任何触摸都保持全屏
+        setupTouchListener();
+        
+        // 强制全屏显示
+        hideSystemUI();
+        
+        // 递归延迟多次设置全屏，确保应用一直保持全屏状态
+        for (int delay : RECURSIVE_DELAYS) {
+            uiHandler.postDelayed(this::hideSystemUI, delay);
+        }
     }
 
     private void setupViewPager(ViewPager2 viewPager, ViewPagerAdapter adapter, List<AppModel> appsList) {
@@ -228,17 +251,137 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        // 保持全屏模式
-        FullScreenHelper.maintainFullScreen(this, hasFocus);
+        if (hasFocus) {
+            hideSystemUI();
+        }
     }
 
     // 添加 onResume 方法来处理从后台返回
     @Override
     protected void onResume() {
         super.onResume();
+        
         // 从后台返回时也切换到首页
         if (viewPager != null) {
             viewPager.setCurrentItem(0, true);
         }
+        
+        // 确保恢复时保持全屏
+        hideSystemUI();
+        
+        // 启动定期检查全屏状态的任务
+        startFullscreenChecker();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        
+        // 停止全屏检查任务
+        stopFullscreenChecker();
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        // 每次触摸事件都保持全屏
+        if (ev.getAction() == MotionEvent.ACTION_DOWN) {
+            hideSystemUI();
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+    
+    /**
+     * 强制隐藏系统UI，实现沉浸式全屏体验
+     */
+    private void hideSystemUI() {
+        Log.d(TAG, "强制隐藏系统UI");
+        
+        // 设置窗口标志
+        getWindow().addFlags(
+            WindowManager.LayoutParams.FLAG_FULLSCREEN |
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        );
+        
+        // 清除非全屏标志
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
+        
+        // 设置系统UI标志 - 使用最强全屏组合
+        View decorView = getWindow().getDecorView();
+        decorView.setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
+            View.SYSTEM_UI_FLAG_FULLSCREEN |
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
+            View.SYSTEM_UI_FLAG_LOW_PROFILE
+        );
+    }
+    
+    /**
+     * 设置全局触摸监听器
+     */
+    private void setupTouchListener() {
+        View rootView = findViewById(android.R.id.content);
+        rootView.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                hideSystemUI();
+            }
+            return false; // 不消费事件
+        });
+    }
+    
+    // 用于定期检查全屏状态的变量
+    private boolean isFullscreenCheckerRunning = false;
+    private static final long FULLSCREEN_CHECK_INTERVAL = 500; // 毫秒
+    private final Runnable fullscreenCheckerRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!isFullscreenCheckerRunning) return;
+            
+            // 检查当前系统UI状态并确保全屏
+            View decorView = getWindow().getDecorView();
+            int visibility = decorView.getSystemUiVisibility();
+            boolean isFullscreen = (visibility & View.SYSTEM_UI_FLAG_FULLSCREEN) != 0;
+            boolean isNavigationHidden = (visibility & View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) != 0;
+            
+            if (!isFullscreen || !isNavigationHidden) {
+                Log.d(TAG, "检测到非全屏状态，重新设置全屏");
+                hideSystemUI();
+            }
+            
+            // 继续下一次检查
+            uiHandler.postDelayed(this, FULLSCREEN_CHECK_INTERVAL);
+        }
+    };
+    
+    /**
+     * 启动全屏状态定期检查任务
+     */
+    private void startFullscreenChecker() {
+        if (!isFullscreenCheckerRunning) {
+            isFullscreenCheckerRunning = true;
+            uiHandler.post(fullscreenCheckerRunnable);
+            Log.d(TAG, "启动全屏状态检查器");
+        }
+    }
+    
+    /**
+     * 停止全屏状态检查任务
+     */
+    private void stopFullscreenChecker() {
+        isFullscreenCheckerRunning = false;
+        uiHandler.removeCallbacks(fullscreenCheckerRunnable);
+        Log.d(TAG, "停止全屏状态检查器");
+    }
+
+    /**
+     * 加载工作区Fragment
+     */
+    private void loadWorkspaceFragment() {
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        FragmentTransaction transaction = fragmentManager.beginTransaction();
+        transaction.replace(R.id.viewPager, new WorkspaceFragment());
+        transaction.commit();
     }
 }

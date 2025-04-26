@@ -41,7 +41,15 @@ android {
 }
 
 
-
+// 在 build.gradle.kts 中
+configurations.all {
+    resolutionStrategy {
+        force("androidx.lifecycle:lifecycle-livedata-core:2.6.2")
+        force("androidx.lifecycle:lifecycle-runtime:2.6.2")
+        force("androidx.lifecycle:lifecycle-viewmodel:2.6.2")
+        // 其他 lifecycle 相关库
+    }
+}
 dependencies {
 
 
@@ -58,6 +66,11 @@ dependencies {
     implementation ("com.google.code.gson:gson:2.8.7")
     implementation ("com.github.centerzx:ShapeBlurView:1.0.5")
     implementation ("com.github.Dimezis:BlurView:version-2.0.3")
+    implementation("sh.calvin.reorderable:reorderable:2.4.3")
+    implementation ("com.github.li-xiaojun:XPopup:2.10.0")
+    implementation ("com.google.android.material:material:1.4.0")
+    implementation ("androidx.recyclerview:recyclerview:1.2.1")
+
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)

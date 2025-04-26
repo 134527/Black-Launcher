@@ -1,12 +1,6 @@
 package com.msk.blacklauncher.fragments;
 
-import static android.content.pm.ApplicationInfo.getCategoryTitle;
-
-import android.animation.Animator;
-import android.animation.AnimatorSet;
-import android.animation.ObjectAnimator;
-import android.app.Activity;
-import  com.msk.blacklauncher.Utils.FullScreenHelper;
+import  com.msk.blacklauncher.utils.FullScreenHelper;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.BroadcastReceiver;
@@ -17,31 +11,24 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
-import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
-import android.provider.MediaStore;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.GridLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.RelativeLayout;
 import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -54,15 +41,12 @@ import androidx.viewpager2.widget.ViewPager2;
 
 import com.msk.blacklauncher.R;
 import com.msk.blacklauncher.SettingsActivity;
-import com.msk.blacklauncher.Utils.AppLayoutManager;
-import com.msk.blacklauncher.Utils.FullScreenHelper;
-import com.msk.blacklauncher.Utils.IconUtils;
+import com.msk.blacklauncher.utils.AppLayoutManager;
+import com.msk.blacklauncher.utils.IconUtils;
 import com.msk.blacklauncher.activities.ScreensaverActivity;
 import com.msk.blacklauncher.model.AppModel;
 import com.msk.blacklauncher.view.CardTouchInterceptor;
-import com.msk.blacklauncher.view.PageIndicator;
 
-import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -73,8 +57,6 @@ import java.util.Locale;
 import java.util.Map;
 
 import eightbitlab.com.blurview.BlurView;
-import eightbitlab.com.blurview.RenderScriptBlur;
-import android.app.WallpaperManager;
 
 public class HomeFragment extends Fragment {
 

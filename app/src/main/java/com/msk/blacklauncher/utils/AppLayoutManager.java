@@ -1,4 +1,4 @@
-package com.msk.blacklauncher.Utils;
+package com.msk.blacklauncher.utils;
 
 
 import android.content.Context;

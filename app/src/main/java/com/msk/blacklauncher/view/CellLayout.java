@@ -9,12 +9,36 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Point;
 import android.graphics.BlurMaskFilter;
+import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.DragEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.view.animation.DecelerateInterpolator;
+import android.view.animation.OvershootInterpolator;
+import androidx.core.view.ViewCompat;
+import androidx.viewpager2.widget.ViewPager2;
+import android.animation.ObjectAnimator;
+import android.animation.PropertyValuesHolder;
+import android.content.pm.LauncherApps;
+import android.content.pm.LauncherApps.ShortcutQuery;
+import android.content.pm.ShortcutInfo;
+import android.os.Process;
+import android.view.Menu;
+import android.widget.PopupMenu;
+import android.content.pm.ApplicationInfo;
+import android.provider.Settings;
+import android.net.Uri;
+import android.content.Intent;
+import android.os.Build;
+import android.graphics.drawable.Drawable;
+import android.content.pm.PackageManager;
+import android.widget.Toast;
+
+import com.msk.blacklauncher.R;
+import com.msk.blacklauncher.view.ShortcutMenuView;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,7 +50,7 @@ import java.util.List;
 public class CellLayout extends ViewGroup implements View.OnDragListener {
 
     private static final String TAG = "CellLayout";
-    private int columns = 6;
+    private int columns = 9;
     private int rows = 4;
     private int per_cell_width;
     private int per_cell_height;
@@ -41,6 +65,39 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
     private boolean isDragging = false;
     private long lastDragEventTime = 0;
     private static final long DRAG_FEEDBACK_INTERVAL = 200; // ms
+    
+    // 悬停预览相关变量
+    private int lastHoverColumn = -1;
+    private int lastHoverRow = -1;
+    private long hoverStartTime = 0;
+    private static final long HOVER_PREVIEW_DELAY = 300; // 悬停多久后显示预览效果(毫秒)
+    private boolean isPreviewActive = false;
+    private ArrayList<View> previewAnimatedViews = new ArrayList<>();
+    
+    // 缓存当前拖拽的单元格
+    private Cell currentDragCell = null;
+    private int dragSourceIndex = -1;
+
+    // 缓存对象，避免频繁创建
+    private final Paint highlightPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF highlightRect = new RectF();
+    
+    // 动态高亮效果相关
+    private float highlightAlpha = 0f;
+    private float targetHighlightAlpha = 0f;
+    private long lastHighlightUpdateTime = 0;
+    private static final long HIGHLIGHT_ANIMATION_DURATION = 150; // ms
+    
+    // 触摸反馈节流控制
+    private static final long EDGE_FEEDBACK_THROTTLE = 800; // ms
+    private long lastEdgeFeedbackTime = 0;
+
+    private PopupMenu currentPopupMenu; // 当前弹出的快捷菜单
+
+    // 添加静态变量用于标记我们是否正在拖拽中
+    private static boolean isInDragging = false;
 
     public CellLayout(Context context) {
         this(context, null);
@@ -56,8 +113,30 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         cellHolds = new boolean[rows][columns];
         needRemoveCells = new ArrayList<>();
         setOnDragListener(this);
+        // 启用硬件加速
+        setLayerType(LAYER_TYPE_HARDWARE, null);
+        // 初始化画笔
+        initPaints();
         // 启用绘制
         setWillNotDraw(false);
+    }
+
+    private void initPaints() {
+        // 高亮背景画笔
+        highlightPaint.setColor(Color.argb(70, 180, 210, 255));
+        highlightPaint.setStyle(Paint.Style.FILL);
+        
+        // 边框画笔
+        borderPaint.setColor(Color.WHITE);
+        borderPaint.setStyle(Paint.Style.STROKE);
+        borderPaint.setStrokeWidth(2);
+        
+        // 发光效果画笔
+        glowPaint.setColor(Color.argb(180, 150, 200, 255));
+        glowPaint.setStyle(Paint.Style.STROKE);
+        glowPaint.setStrokeWidth(6);
+        // 使用硬件加速兼容的模糊效果
+        glowPaint.setMaskFilter(new BlurMaskFilter(15, BlurMaskFilter.Blur.OUTER));
     }
 
     // 在 CellLayout 中添加设置单元格可拖拽的方法
@@ -66,52 +145,40 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
 
         View contentView = cell.getContentView();
 
-        // 设置长按启动拖拽
+        // 设置长按启动快捷方式或应用选项菜单
         contentView.setOnLongClickListener(v -> {
-            // 空单元格不能拖拽
-            if ("empty".equals(cell.getTag())) {
-                return false;
-            }
-
-            ClipData dragData = new ClipData(
-                    cell.getTag(),
-                    new String[] { ClipDescription.MIMETYPE_TEXT_PLAIN },
-                    new ClipData.Item(cell.getTag())
-            );
-
-            View.DragShadowBuilder shadowBuilder = new View.DragShadowBuilder(contentView) {
-                @Override
-                public void onProvideShadowMetrics(Point outShadowSize, Point outShadowTouchPoint) {
-                    super.onProvideShadowMetrics(outShadowSize, outShadowTouchPoint);
-                    // 调整拖拽阴影的触摸点为中心
-                    outShadowTouchPoint.set(outShadowSize.x / 2, outShadowSize.y / 2);
-                }
-                
-                @Override
-                public void onDrawShadow(Canvas canvas) {
-                    // 设置拖拽时的阴影半透明
-                    canvas.save();
-                    canvas.scale(0.8f, 0.8f, canvas.getWidth()/2f, canvas.getHeight()/2f);
-                    super.onDrawShadow(canvas);
-                    canvas.restore();
-                }
-            };
-
-            // 设置拖拽标志
-            isDragging = true;
-            
-            // 开始拖拽操作
-            contentView.startDragAndDrop(
-                    dragData,
-                    shadowBuilder,
-                    cell, // 传递Cell对象作为本地状态
-                    View.DRAG_FLAG_OPAQUE
-            );
-
-            // 临时隐藏原视图
-            contentView.setVisibility(View.INVISIBLE);
-
+            // 立即显示快捷菜单
+            showAppShortcuts(v, cell.getTag());
             return true;
+        });
+        
+        // 添加触摸监听，用于检测长按后的移动
+        contentView.setOnTouchListener((v, event) -> {
+            // 如果菜单正在显示，并且用户开始移动
+            if (currentPopupMenu != null && event.getAction() == android.view.MotionEvent.ACTION_MOVE) {
+                // 计算移动距离
+                float moveDistance = (float) Math.sqrt(
+                    Math.pow(event.getX() - v.getWidth()/2f, 2) + 
+                    Math.pow(event.getY() - v.getHeight()/2f, 2));
+                    
+                // 如果移动距离超过阈值，取消菜单并开始拖拽
+                if (moveDistance > v.getWidth() * 0.15f) {
+                    // 取消当前菜单
+                    if (currentPopupMenu != null) {
+                        currentPopupMenu.dismiss();
+                        currentPopupMenu = null;
+                    }
+                    
+                    // 关闭所有ShortcutMenuView活跃菜单
+                    ShortcutMenuView.dismissActiveMenus();
+                    
+                    // 开始拖拽
+                    isInDragging = true;
+                    startDragFromCell(cell);
+                    return true;
+                }
+            }
+            return false;
         });
     }
 
@@ -337,142 +404,394 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
 
     @Override
     public boolean onDrag(View v, DragEvent event) {
-        // 获取拖拽的单元格索引
-        int dragCellIndex = -1;
-        Cell dragCell = null;
-
-        if (event.getLocalState() != null && event.getLocalState() instanceof Cell) {
-            dragCell = (Cell) event.getLocalState();
-            String dragTag = dragCell.getTag();
-
-            // 查找拖动的单元格在当前页的索引
-            for (int i = 0; i < cells.size(); i++) {
-                Cell currentCell = cells.get(i);
-                if (currentCell != null && currentCell.getTag() != null &&
-                        currentCell.getTag().equals(dragTag)) {
-                    dragCellIndex = i;
-                    break;
-                }
-            }
-        }
-
-        switch (event.getAction()) {
-            case DragEvent.ACTION_DRAG_STARTED:
-                lastDragX = -1;
-                lastDragY = -1;
-                return true;
-
-            case DragEvent.ACTION_DRAG_ENTERED:
-                // 进入当前视图区域时触发震动反馈
-                if (getContext() != null) {
-                    performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
-                }
-                return true;
-
-            case DragEvent.ACTION_DRAG_LOCATION:
-                // 减少刷新频率，避免过度绘制
-                long currentTime = System.currentTimeMillis();
-                if (currentTime - lastDragEventTime < DRAG_FEEDBACK_INTERVAL) {
-                    return true;
-                }
-                lastDragEventTime = currentTime;
-                
-                // 计算当前悬停位置对应的单元格
-                int column = Math.min(columns - 1, Math.max(0, (int)(event.getX() / per_cell_width)));
-                int row = Math.min(rows - 1, Math.max(0, (int)(event.getY() / per_cell_height)));
-
-                // 如果位置发生变化，才更新UI
-                if (column != highLightColumn || row != highLightRow) {
-                    highLightColumn = column;
-                    highLightRow = row;
-                    highLightValid = true;  // 设置为可放置
-                    invalidate();
-                }
-                
-                return true;
-
-            case DragEvent.ACTION_DRAG_EXITED:
-                highLightValid = false;
-                invalidate();
-                return true;
-
-            case DragEvent.ACTION_DROP:
-                if (dragCellIndex < 0 && dragCell == null) {
-                    Log.e(TAG, "拖拽索引无效: " + dragCellIndex);
-                    resetHighlight();
-                    return false;
-                }
-
-                // 计算目标位置
-                int targetColumn = Math.min(columns - 1, Math.max(0, (int)(event.getX() / per_cell_width)));
-                int targetRow = Math.min(rows - 1, Math.max(0, (int)(event.getY() / per_cell_height)));
-                int targetIndex = targetRow * columns + targetColumn;
-
-                // 确保目标索引有效
-                if (targetIndex >= 0 && targetIndex < cells.size()) {
-                    // 处理源位于当前页面的情况
-                    if (dragCellIndex >= 0) {
-                        Cell targetCell = cells.get(targetIndex);
-
-                        // 判断目标单元格类型并采用不同处理方式
-                        if (targetCell.getTag().equals("empty")) {
-                            // 空白单元格 - 直接交换位置
-                            swapCells(dragCellIndex, targetIndex);
-                            Log.d(TAG, "将应用图标与空白单元格交换: " + dragCellIndex + " <-> " + targetIndex);
-                        } else {
-                            // 非空单元格 - 插入并移动
-                            moveCells(dragCellIndex, targetIndex);
-                            Log.d(TAG, "将应用图标移动至非空单元格: " + dragCellIndex + " -> " + targetIndex);
-                        }
-                    } else if (dragCell != null) {
-                        // 处理源可能来自不同页面的情况
-                        if (dragCell != null && cellOverflowListener != null) {
-                            Cell targetCell = cells.get(targetIndex);
-                            cellOverflowListener.onCellSwapped(dragCell, -1, -1, targetColumn, targetRow);
+        try {
+            switch (event.getAction()) {
+                case DragEvent.ACTION_DRAG_STARTED:
+                    // 隐藏正在显示的快捷菜单
+                    if (currentPopupMenu != null) {
+                        currentPopupMenu.dismiss();
+                        currentPopupMenu = null;
+                    }
+                    
+                    // 关闭所有ShortcutMenuView活跃菜单
+                    ShortcutMenuView.dismissActiveMenus();
+                    
+                    // 拖动开始
+                    isDragging = true;
+                    isInDragging = true;
+                    lastDragX = event.getX();
+                    lastDragY = event.getY();
+                    
+                    // 获取并缓存当前拖拽的单元格
+                    Object localState = event.getLocalState();
+                    if (localState instanceof Cell) {
+                        currentDragCell = (Cell) localState;
+                        // 查找拖拽源单元格的索引
+                        for (int i = 0; i < cells.size(); i++) {
+                            if (cells.get(i) == currentDragCell || 
+                                (cells.get(i).getTag() != null && 
+                                 currentDragCell.getTag() != null &&
+                                 cells.get(i).getTag().equals(currentDragCell.getTag()))) {
+                                dragSourceIndex = i;
+                                break;
+                            }
                         }
                     }
                     
-                    // 通知更新保存位置
-                    if (cellOverflowListener != null) {
-                        cellOverflowListener.saveAppPositions();
+                    // 完全重置和禁用高亮状态
+                    highLightColumn = -1;
+                    highLightRow = -1;
+                    highlightAlpha = 0f;
+                    targetHighlightAlpha = 0f;
+                    highLightValid = false; // 禁用高亮
+                    lastHighlightUpdateTime = System.currentTimeMillis();
+                    
+                    // 立即强制重绘以清除任何高亮框
+                    invalidate();
+                    
+                    // 重置悬停预览状态
+                    lastHoverColumn = -1;
+                    lastHoverRow = -1;
+                    hoverStartTime = 0;
+                    isPreviewActive = false;
+                    cancelPreviewAnimations();
+                    
+                    // 显示左右拖拽区域指示器
+                    showDragIndicators(v);
+                    
+                    Log.d(TAG, "拖动开始 - X: " + lastDragX + ", Y: " + lastDragY);
+                    return true;
+
+                case DragEvent.ACTION_DRAG_ENTERED:
+                    // 拖动进入视图区域
+                    Log.d(TAG, "拖动进入视图区域");
+                    
+                    // 播放页面进入动画
+                    playPageEnterAnimation(v);
+                    
+                    return true;
+
+                case DragEvent.ACTION_DRAG_LOCATION:
+                    // 拖动定位 - 处理高亮和边缘滚动
+                    
+                    float x = event.getX();
+                    float y = event.getY();
+                    
+                    // 记录最后的拖动位置
+                    lastDragX = x;
+                    lastDragY = y;
+                    
+                    // 计算当前高亮位置
+                    int highlightCol = Math.min(columns - 1, Math.max(0, (int)(x / per_cell_width)));
+                    int highlightRow = Math.min(rows - 1, Math.max(0, (int)(y / per_cell_height)));
+                    
+                    // 在拖拽状态下，只更新位置但强制禁用高亮
+                    highLightColumn = highlightCol;
+                    highLightRow = highlightRow;
+                    // 确保拖拽状态下高亮始终无效
+                    highLightValid = false;
+                    
+                    // 如果位置发生变化，重置悬停计时器
+                    if (highlightCol != lastHoverColumn || highlightRow != lastHoverRow) {
+                        // 取消之前的预览效果
+                        if (isPreviewActive) {
+                            cancelPreviewAnimations();
+                            isPreviewActive = false;
+                        }
+                        
+                        // 关闭所有ShortcutMenuView活跃菜单
+                        ShortcutMenuView.dismissActiveMenus();
+                        
+                        // 记录新的悬停位置和时间
+                        lastHoverColumn = highlightCol;
+                        lastHoverRow = highlightRow;
+                        hoverStartTime = System.currentTimeMillis();
+                    } else if (!isPreviewActive) {
+                        // 位置没变，检查是否需要显示预览
+                        long currentTime = System.currentTimeMillis();
+                        long hoverTime = currentTime - hoverStartTime;
+                        
+                        if (hoverTime >= HOVER_PREVIEW_DELAY && 
+                            lastHoverColumn >= 0 && lastHoverRow >= 0) {
+                            // 显示预览效果前也关闭菜单
+                            ShortcutMenuView.dismissActiveMenus();
+                            
+                            // 显示预览效果
+                            showPreviewAnimation(lastHoverColumn, lastHoverRow);
+                        }
                     }
-                }
+                    
+                    // 检测是否靠近屏幕边缘 - 优化的边缘检测逻辑
+                    int edgeSize = (int)(Math.min(per_cell_width, per_cell_height) * 1.2f); // 增大边缘区域大小
+                    boolean isNearLeftEdge = x < edgeSize;
+                    boolean isNearRightEdge = x > getWidth() - edgeSize;
+                    
+                    // 更新边缘指示器可见性
+                    updateDragIndicators(v, isNearLeftEdge, isNearRightEdge);
+                    
+                    // 检查时间间隔，避免频繁触发
+                    long currentTime = System.currentTimeMillis();
+                    if (currentTime - lastDragEventTime > DRAG_FEEDBACK_INTERVAL) {
+                        lastDragEventTime = currentTime;
+                        
+                        // 如果靠近屏幕左右边缘，通知需要切换页面
+                        if ((isNearLeftEdge || isNearRightEdge) && 
+                            currentTime - lastEdgeFeedbackTime > EDGE_FEEDBACK_THROTTLE) {
+                            lastEdgeFeedbackTime = currentTime;
+                            
+                            // 取消预览效果
+                            if (isPreviewActive) {
+                                cancelPreviewAnimations();
+                                isPreviewActive = false;
+                            }
+                            
+                            // 关闭所有ShortcutMenuView活跃菜单
+                            ShortcutMenuView.dismissActiveMenus();
+                            
+                            // 边缘滚动逻辑...（保持原有实现）
+                        }
+                    }
+                    
+                    return true;
 
-                // 恢复被拖动单元格的视觉状态
-                if (dragCell != null && dragCell.getContentView() != null) {
-                    dragCell.getContentView().setAlpha(1.0f);
-                    dragCell.getContentView().setVisibility(View.VISIBLE);
-                }
+                case DragEvent.ACTION_DRAG_EXITED:
+                    // 拖动退出视图区域
+                    Log.d(TAG, "拖动退出视图区域");
+                    fadeOutHighlight();
+                    
+                    // 取消预览效果
+                    if (isPreviewActive) {
+                        cancelPreviewAnimations();
+                        isPreviewActive = false;
+                    }
+                    
+                    // 隐藏拖拽指示器
+                    hideDragIndicators(v);
+                    
+                    return true;
 
-                // 重置高亮状态
-                resetHighlight();
-                return true;
+                case DragEvent.ACTION_DROP:
+                    // 处理放置操作
+                    Log.d(TAG, "拖动放置");
+                    
+                    // 重置高亮状态
+                    fadeOutHighlight();
+                    isDragging = false;
+                    
+                    // 如果有预览效果，先取消
+                    if (isPreviewActive) {
+                        cancelPreviewAnimations();
+                        isPreviewActive = false;
+                    }
+                    
+                    // 隐藏拖拽指示器
+                    hideDragIndicators(v);
+                    
+                    // 获取放置的位置
+                    float dropX = event.getX();
+                    float dropY = event.getY();
+                    
+                    // 获取拖动中的数据对象（单元格）
+                     localState = event.getLocalState();
+                    Cell dragCell = null;
+                    int fromPage = -1;
+                    
+                    if (localState instanceof Cell) {
+                        dragCell = (Cell) localState;
+                        
+                        // 检查是否是跨页面拖拽并提取源页面
+                        String tag = dragCell.getTag();
+                        boolean isCrossPageDrag = tag != null && tag.contains(":cross_page");
+                        
+                        if (isCrossPageDrag) {
+                            // 提取源页面索引
+                            String[] parts = tag.split(":");
+                            if (parts.length >= 3) {
+                                try {
+                                    fromPage = Integer.parseInt(parts[parts.length - 1]);
+                                } catch (NumberFormatException e) {
+                                    Log.e(TAG, "解析源页面索引失败", e);
+                                }
+                            }
+                            
+                            // 还原标签
+                            dragCell.setTag(tag.substring(0, tag.indexOf(":cross_page")));
+                        }
+                    }
+                    
+                    // 在拖拽结束时恢复视图可见性，并添加放置动画
+                    if (dragCell != null && dragCell.getContentView() != null) {
+                        View contentView = dragCell.getContentView();
+                        contentView.setVisibility(View.VISIBLE);
+                        contentView.setAlpha(0.7f);
+                        contentView.setScaleX(1.1f);
+                        contentView.setScaleY(1.1f);
+                        
+                        // 应用放置动画 - 使用OvershootInterpolator实现弹性效果
+                        contentView.animate()
+                            .alpha(1.0f)
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setInterpolator(new OvershootInterpolator(0.8f))
+                            .setDuration(250)
+                            .start();
+                    }
+                    
+                    // 找到拖动的单元格在当前页面中的索引
+                    int dragCellIndex = dragSourceIndex;
+                    if (dragCellIndex < 0) {
+                        for (int i = 0; i < cells.size(); i++) {
+                            Cell cell = cells.get(i);
+                            if (cell == dragCell || (cell.getTag() != null && dragCell != null && 
+                                    cell.getTag().equals(dragCell.getTag()))) {
+                                dragCellIndex = i;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // 如果是从其他页面拖过来的，dragCellIndex可能为-1
+                    
+                    // 计算目标位置
+                    int targetColumn = Math.min(columns - 1, Math.max(0, (int)(event.getX() / per_cell_width)));
+                    int targetRow = Math.min(rows - 1, Math.max(0, (int)(event.getY() / per_cell_height)));
+                    int targetIndex = targetRow * columns + targetColumn;
 
-            case DragEvent.ACTION_DRAG_ENDED:
-                // 确保被拖动的单元格恢复正常
-                if (dragCell != null && dragCell.getContentView() != null) {
-                    dragCell.getContentView().setAlpha(1.0f);
-                    dragCell.getContentView().setVisibility(View.VISIBLE);
-                }
+                    // 确保目标索引有效
+                    if (targetIndex >= 0 && targetIndex < cells.size()) {
+                        // 处理源位于当前页面的情况
+                        if (dragCellIndex >= 0) {
+                            Cell targetCell = cells.get(targetIndex);
 
-                // 重置拖拽标志
-                isDragging = false;
-                
-                // 重置高亮状态
-                resetHighlight();
-                return true;
+                            // 判断目标单元格类型并采用不同处理方式
+                            if (targetCell.getTag().equals("empty")) {
+                                // 空白单元格 - 直接交换位置
+                                swapCells(dragCellIndex, targetIndex);
+                                Log.d(TAG, "将应用图标与空白单元格交换: " + dragCellIndex + " <-> " + targetIndex);
+                            } else {
+                                // 非空单元格 - 插入并移动
+                                moveCells(dragCellIndex, targetIndex);
+                                Log.d(TAG, "将应用图标移动至非空单元格: " + dragCellIndex + " -> " + targetIndex);
+                            }
+                        } else if (dragCell != null) {
+                            // 处理源来自不同页面的情况
+                            if (dragCell != null && cellOverflowListener != null) {
+                                // 获取当前页面索引
+                                ViewParent parent = getParent();
+                                int currentPage = -1;
+                                
+                                while (parent != null && !(parent.getParent() instanceof ViewPager2)) {
+                                    parent = parent.getParent();
+                                }
+                                
+                                if (parent != null) {
+                                    ViewGroup viewPagerContent = (ViewGroup) parent;
+                                    ViewPager2 viewPager = (ViewPager2) viewPagerContent.getParent();
+                                    currentPage = viewPager.getCurrentItem();
+                                }
+                                
+                                // 调用监听器处理跨页面拖拽
+                                cellOverflowListener.onCellSwapped(dragCell, fromPage, currentPage, targetColumn, targetRow);
+                            }
+                        }
+                        
+                        // 通知更新保存位置
+                        if (cellOverflowListener != null) {
+                            cellOverflowListener.saveAppPositions();
+                        }
+                    }
+                    
+                    // 请求重绘
+                    invalidate();
+                    return true;
+
+                case DragEvent.ACTION_DRAG_ENDED:
+                    // 拖动操作结束
+                    Log.d(TAG, "拖动结束");
+                    
+                    // 重置高亮和拖动状态
+                    fadeOutHighlight();
+                    isDragging = false;
+                    isInDragging = false;
+                    
+                    // 取消预览效果
+                    if (isPreviewActive) {
+                        cancelPreviewAnimations();
+                        isPreviewActive = false;
+                    }
+                    
+                    // 隐藏拖拽指示器
+                    hideDragIndicators(v);
+                    
+                    // 确保所有临时隐藏的视图恢复可见
+                    for (Cell cell : cells) {
+                        if (cell.getContentView() != null && !cell.getTag().equals("empty")) {
+                            View contentView = cell.getContentView();
+                            contentView.setVisibility(View.VISIBLE);
+                            
+                            // 确保视图属性重置，使用动画效果
+                            contentView.animate()
+                                .alpha(1.0f)
+                                .scaleX(1.0f)
+                                .scaleY(1.0f)
+                                .setInterpolator(new DecelerateInterpolator())
+                                .setDuration(150)
+                                .start();
+                        }
+                    }
+                    
+                    // 重置拖拽缓存
+                    currentDragCell = null;
+                    dragSourceIndex = -1;
+                    
+                    // 请求重绘
+                    invalidate();
+                    return true;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "拖拽处理错误: " + e.getMessage(), e);
+            // 重置状态
+            fadeOutHighlight();
+            isDragging = false;
+            
+            // 取消预览效果
+            if (isPreviewActive) {
+                cancelPreviewAnimations();
+                isPreviewActive = false;
+            }
+            
+            // 隐藏拖拽指示器
+            hideDragIndicators(v);
+            
+            invalidate();
         }
 
         return false;
+    }
+
+    /**
+     * 平滑淡出高亮效果
+     */
+    private void fadeOutHighlight() {
+        if (highLightValid && targetHighlightAlpha > 0) {
+            // 设置目标alpha为0，启动淡出动画
+            targetHighlightAlpha = 0f;
+            lastHighlightUpdateTime = System.currentTimeMillis();
+            ViewCompat.postInvalidateOnAnimation(this);
+        } else {
+            // 直接重置状态
+            resetHighlight();
+        }
     }
 
     private void resetHighlight() {
         highLightColumn = -1;
         highLightRow = -1;
         highLightValid = false;
+        highlightAlpha = 0f;
+        targetHighlightAlpha = 0f;
         invalidate();
     }
-
 
     private void moveCells(int sourceIndex, int targetIndex) {
         // 确保索引有效
@@ -514,22 +833,151 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         // 创建临时数组保存当前状态
         ArrayList<Cell> tempCells = new ArrayList<>(cells);
 
+        // 记录哪些视图需要应用动画
+        ArrayList<Integer> cellsToAnimate = new ArrayList<>();
+        
         if (targetIndex > sourceIndex) {
             // 向后移动: 目标位置比源位置大
+            // 收集需要应用动画的单元格索引
+            for (int i = sourceIndex + 1; i <= targetIndex; i++) {
+                if (!tempCells.get(i).getTag().equals("empty")) {
+                    cellsToAnimate.add(i);
+                }
+            }
+            
+            // 应用位置变更
             for (int i = sourceIndex; i < targetIndex; i++) {
                 cells.set(i, tempCells.get(i + 1));
             }
             cells.set(targetIndex, sourceCell);
         } else {
             // 向前移动: 目标位置比源位置小
+            // 收集需要应用动画的单元格索引
+            for (int i = targetIndex; i < sourceIndex; i++) {
+                if (!tempCells.get(i).getTag().equals("empty")) {
+                    cellsToAnimate.add(i);
+                }
+            }
+            
+            // 应用位置变更
             for (int i = sourceIndex; i > targetIndex; i--) {
                 cells.set(i, tempCells.get(i - 1));
             }
             cells.set(targetIndex, sourceCell);
         }
-
+        
+        // 应用图标滑动动画
+        applySlideAnimations(tempCells, cellsToAnimate, sourceIndex, targetIndex);
+        
         // 重新布局
         requestLayout();
+    }
+    
+    // 增强的图标滑动动画方法
+    private void applySlideAnimations(ArrayList<Cell> originalCells, ArrayList<Integer> cellsToAnimate, 
+                                     int sourceIndex, int targetIndex) {
+        // 获取布局尺寸
+        int layoutWidth = getWidth();
+        int layoutHeight = getHeight();
+        
+        // 设置动画基础参数
+        long baseDuration = 280; // 基础动画时长
+        long staggerDelay = 30;  // 每个图标的延迟时间差
+        
+        for (int i = 0; i < cellsToAnimate.size(); i++) {
+            Integer originalIndex = cellsToAnimate.get(i);
+            Cell cell = originalCells.get(originalIndex);
+            if (cell.getContentView() == null || cell.getTag().equals("empty")) {
+                continue;
+            }
+            
+            View iconView = cell.getContentView();
+            
+            // 找出此单元格在新位置的坐标
+            int newIndex;
+            if (targetIndex > sourceIndex) {
+                // 向后移动
+                newIndex = originalIndex - 1;
+            } else {
+                // 向前移动
+                newIndex = originalIndex + 1;
+            }
+            
+            // 计算原位置和新位置的坐标差
+            int fromColumn = originalIndex % columns;
+            int fromRow = originalIndex / columns;
+            int toColumn = newIndex % columns;
+            int toRow = newIndex / columns;
+            
+            float fromX = fromColumn * per_cell_width;
+            float fromY = fromRow * per_cell_height;
+            float toX = toColumn * per_cell_width;
+            float toY = toRow * per_cell_height;
+            
+            // 设置初始位置的平移
+            iconView.setTranslationX(0);
+            iconView.setTranslationY(0);
+            
+            // 计算当前图标的动画延迟（错开动画开始时间）
+            long delay = i * staggerDelay;
+            
+            // 设置硬件加速提高动画性能
+            iconView.setLayerType(LAYER_TYPE_HARDWARE, null);
+            
+            // 如果是横向移动，添加小幅纵向移动做波浪效果
+            float waveOffset = 0;
+            if (fromRow == toRow) {
+                // 横向移动的情况，添加波浪效果
+                waveOffset = 10f; // 波浪振幅，像素
+            }
+            
+            // 保存原始Z轴高度
+            float originalZ = iconView.getZ();
+            
+            // 提高Z轴高度，使动画中的图标显示在上层
+            iconView.setZ(originalZ + 10);
+            
+            // 开始移动前先应用压缩效果
+            float finalWaveOffset = waveOffset;
+            iconView.animate()
+                .scaleX(0.85f)
+                .scaleY(0.85f)
+                .setDuration(baseDuration / 3)
+                .setStartDelay(delay)
+                .withEndAction(() -> {
+                    // 主移动动画 - 带波浪效果和弹性
+                    iconView.animate()
+                        .translationX(toX - fromX)
+                        .translationY(toY - fromY + finalWaveOffset)
+                        .scaleX(1.0f)
+                        .scaleY(1.0f)
+                        .setInterpolator(new OvershootInterpolator(0.9f))
+                        .setDuration(baseDuration)
+                        .start();
+                })
+                .start();
+            
+            // 在动画过程中添加轻微旋转，使效果更加自然
+            float rotationAmount = 2.0f; // 旋转角度（度）
+            
+            // 如果是横向移动，根据方向调整旋转角度
+            if (fromRow == toRow) {
+                // 根据移动方向确定旋转方向
+                rotationAmount = (fromColumn > toColumn) ? rotationAmount : -rotationAmount;
+            }
+            
+            iconView.animate()
+                .rotation(rotationAmount)
+                .setDuration(baseDuration / 2)
+                .setStartDelay(delay + baseDuration / 3)
+                .withEndAction(() -> {
+                    iconView.animate()
+                        .rotation(0)
+                        .setDuration(baseDuration / 2)
+                        .start();
+                })
+                .start();
+        }
     }
 
     // 在CellLayout类中添加
@@ -573,45 +1021,66 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
     protected void dispatchDraw(Canvas canvas) {
         super.dispatchDraw(canvas);
 
-        // 如果有高亮单元格，绘制应用图标大小的模糊边框
-        if (highLightValid && highLightColumn >= 0 && highLightRow >= 0) {
-            Paint paint = new Paint();
+        // 只有在highLightValid为true且不在拖拽状态时才绘制高亮效果
+        if (highLightValid && !isDragging && !isInDragging && highLightColumn >= 0 && highLightRow >= 0) {
+            // 计算动画插值
+            long currentTime = System.currentTimeMillis();
+            long elapsed = currentTime - lastHighlightUpdateTime;
             
-            // 计算单元格区域
-            float cellLeft = highLightColumn * per_cell_width;
-            float cellTop = highLightRow * per_cell_height;
+            if (targetHighlightAlpha > highlightAlpha) {
+                // 淡入
+                highlightAlpha = Math.min(targetHighlightAlpha, 
+                                         highlightAlpha + (elapsed / (float)HIGHLIGHT_ANIMATION_DURATION));
+            } else if (targetHighlightAlpha < highlightAlpha) {
+                // 淡出
+                highlightAlpha = Math.max(targetHighlightAlpha,
+                                         highlightAlpha - (elapsed / (float)HIGHLIGHT_ANIMATION_DURATION));
+            }
             
-            // 计算图标的大小（比单元格略小）
-            float iconSize = Math.min(per_cell_width, per_cell_height) * 0.8f;
+            // 更新时间戳
+            lastHighlightUpdateTime = currentTime;
             
-            // 计算图标居中后的区域
-            float iconLeft = cellLeft + (per_cell_width - iconSize) / 2;
-            float iconTop = cellTop + (per_cell_height - iconSize) / 2;
-            float iconRight = iconLeft + iconSize;
-            float iconBottom = iconTop + iconSize;
-            
-            // 绘制半透明背景
-            paint.setColor(Color.argb(50, 255, 255, 255));
-            paint.setStyle(Paint.Style.FILL);
-            canvas.drawRect(iconLeft, iconTop, iconRight, iconBottom, paint);
-            
-            // 创建模糊效果
-            paint.setColor(Color.WHITE);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(2);
-            
-            // 绘制内边框
-            canvas.drawRect(iconLeft, iconTop, iconRight, iconBottom, paint);
-            
-            // 应用模糊发光效果
-            paint.setColor(Color.argb(180, 150, 200, 255));
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(6); 
-            paint.setMaskFilter(new BlurMaskFilter(15, BlurMaskFilter.Blur.OUTER));
-            canvas.drawRect(iconLeft, iconTop, iconRight, iconBottom, paint);
-            
-            // 清除模糊效果
-            paint.setMaskFilter(null);
+            // 如果高亮还在显示，继续动画
+            if (highlightAlpha > 0) {
+                // 计算单元格区域
+                float cellLeft = highLightColumn * per_cell_width;
+                float cellTop = highLightRow * per_cell_height;
+                
+                // 计算图标的大小（比单元格略小）
+                float iconSize = Math.min(per_cell_width, per_cell_height) * 0.85f;
+                
+                // 计算图标居中后的区域
+                float iconLeft = cellLeft + (per_cell_width - iconSize) / 2;
+                float iconTop = cellTop + (per_cell_height - iconSize) / 2;
+                float iconRight = iconLeft + iconSize;
+                float iconBottom = iconTop + iconSize;
+                
+                // 存储高亮区域
+                highlightRect.set(iconLeft, iconTop, iconRight, iconBottom);
+                
+                // 应用当前alpha值
+                int alpha = (int)(70 * highlightAlpha);
+                highlightPaint.setAlpha(alpha);
+                
+                // 绘制圆角矩形高亮背景
+                float cornerRadius = 20f;
+                canvas.drawRoundRect(highlightRect, cornerRadius, cornerRadius, highlightPaint);
+                
+                // 绘制内边框
+                alpha = (int)(255 * highlightAlpha);
+                borderPaint.setAlpha(alpha);
+                canvas.drawRoundRect(highlightRect, cornerRadius, cornerRadius, borderPaint);
+                
+                // 应用模糊发光效果
+                alpha = (int)(180 * highlightAlpha);
+                glowPaint.setAlpha(alpha);
+                canvas.drawRoundRect(highlightRect, cornerRadius, cornerRadius, glowPaint);
+                
+                // 请求继续动画
+                if (highlightAlpha != targetHighlightAlpha) {
+                    ViewCompat.postInvalidateOnAnimation(this);
+                }
+            }
         }
     }
     public static class Cell {
@@ -751,6 +1220,12 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
          * @param pageIndex 页面索引
          */
         void setupWorkspacePage(int pageIndex);
+        
+        /**
+         * 获取页面总数
+         * @return 页面总数
+         */
+        int getPageCount();
     }
 
     private OnCellOverflowListener cellOverflowListener;
@@ -759,5 +1234,560 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         this.cellOverflowListener = listener;
     }
 
+    // 新增方法：显示拖拽区域指示器
+    private void showDragIndicators(View view) {
+        ViewGroup parent = (ViewGroup) view.getParent();
+        if (parent != null) {
+            View leftIndicator = parent.findViewById(R.id.drag_indicator_left);
+            View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
+            
+            if (leftIndicator != null && rightIndicator != null) {
+                leftIndicator.setVisibility(View.VISIBLE);
+                rightIndicator.setVisibility(View.VISIBLE);
+                
+                // 应用渐变动画
+                leftIndicator.setAlpha(0f);
+                rightIndicator.setAlpha(0f);
+                
+                // 使用硬件加速提高动画性能
+                leftIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
+                rightIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
+                
+                leftIndicator.animate()
+                    .alpha(1f)
+                    .setDuration(200)
+                    .withEndAction(() -> leftIndicator.setLayerType(LAYER_TYPE_NONE, null))
+                    .start();
+                
+                rightIndicator.animate()
+                    .alpha(1f)
+                    .setDuration(200)
+                    .withEndAction(() -> rightIndicator.setLayerType(LAYER_TYPE_NONE, null))
+                    .start();
+            }
+        }
+    }
 
+    // 新增方法：更新拖拽区域指示器状态
+    private void updateDragIndicators(View view, boolean isNearLeft, boolean isNearRight) {
+        ViewGroup parent = (ViewGroup) view.getParent();
+        if (parent != null) {
+            View leftIndicator = parent.findViewById(R.id.drag_indicator_left);
+            View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
+            
+            if (leftIndicator != null && rightIndicator != null) {
+                // 激活靠近的边缘指示器
+                if (isNearLeft) {
+                    leftIndicator.setBackgroundColor(Color.argb(100, 100, 180, 255));
+                    
+                    // 仅当状态改变时应用动画，避免性能浪费
+                    if (leftIndicator.getScaleX() < 1.15f) {
+                        leftIndicator.animate()
+                            .scaleX(1.2f)
+                            .scaleY(1.05f)
+                            .setInterpolator(new OvershootInterpolator(0.5f))
+                            .setDuration(150)
+                            .start();
+                    }
+                } else {
+                    leftIndicator.setBackgroundColor(Color.argb(50, 255, 255, 255));
+                    
+                    // 仅当状态改变时应用动画
+                    if (leftIndicator.getScaleX() > 1.05f) {
+                        leftIndicator.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(100)
+                            .start();
+                    }
+                }
+                
+                if (isNearRight) {
+                    rightIndicator.setBackgroundColor(Color.argb(100, 100, 180, 255));
+                    
+                    // 仅当状态改变时应用动画
+                    if (rightIndicator.getScaleX() < 1.15f) {
+                        rightIndicator.animate()
+                            .scaleX(1.2f)
+                            .scaleY(1.05f)
+                            .setInterpolator(new OvershootInterpolator(0.5f))
+                            .setDuration(150)
+                            .start();
+                    }
+                } else {
+                    rightIndicator.setBackgroundColor(Color.argb(50, 255, 255, 255));
+                    
+                    // 仅当状态改变时应用动画
+                    if (rightIndicator.getScaleX() > 1.05f) {
+                        rightIndicator.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(100)
+                            .start();
+                    }
+                }
+            }
+        }
+    }
+
+    // 新增方法：隐藏拖拽区域指示器
+    private void hideDragIndicators(View view) {
+        ViewGroup parent = (ViewGroup) view.getParent();
+        if (parent != null) {
+            View leftIndicator = parent.findViewById(R.id.drag_indicator_left);
+            View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
+            
+            if (leftIndicator != null && rightIndicator != null) {
+                // 使用硬件加速提高动画性能
+                leftIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
+                rightIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
+                
+                // 应用渐变动画后隐藏
+                leftIndicator.animate().alpha(0f).setDuration(150)
+                    .withEndAction(() -> {
+                        leftIndicator.setVisibility(View.GONE);
+                        leftIndicator.setLayerType(LAYER_TYPE_NONE, null);
+                    })
+                    .start();
+                
+                rightIndicator.animate().alpha(0f).setDuration(150)
+                    .withEndAction(() -> {
+                        rightIndicator.setVisibility(View.GONE);
+                        rightIndicator.setLayerType(LAYER_TYPE_NONE, null);
+                    })
+                    .start();
+            }
+        }
+    }
+
+    private void playPageEnterAnimation(View pageView) {
+        // 设置初始缩放状态（缩小至95%）
+        pageView.setScaleX(0.95f);
+        pageView.setScaleY(0.95f);
+        pageView.setAlpha(0.9f);
+        
+        // 创建动画，恢复到正常大小
+        PropertyValuesHolder scaleX = PropertyValuesHolder.ofFloat(View.SCALE_X, 0.95f, 1.0f);
+        PropertyValuesHolder scaleY = PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.95f, 1.0f);
+        PropertyValuesHolder alpha = PropertyValuesHolder.ofFloat(View.ALPHA, 0.9f, 1.0f);
+        
+        ObjectAnimator animator = ObjectAnimator.ofPropertyValuesHolder(pageView, scaleX, scaleY, alpha);
+        animator.setDuration(200);
+        animator.start();
+    }
+
+    /**
+     * 显示预览动画效果
+     * @param column 目标列
+     * @param row 目标行
+     */
+    private void showPreviewAnimation(int column, int row) {
+        if (currentDragCell == null || dragSourceIndex < 0) {
+            return;
+        }
+        
+        // 确保关闭所有菜单
+        ShortcutMenuView.dismissActiveMenus();
+        
+        // 标记预览状态为活跃
+        isPreviewActive = true;
+        
+        // 计算目标索引
+        int targetIndex = row * columns + column;
+        
+        // 如果目标是空白单元格或拖拽源单元格，不显示预览
+        if (targetIndex == dragSourceIndex || 
+            targetIndex >= cells.size() || 
+            cells.get(targetIndex).getTag().equals("empty")) {
+            return;
+        }
+        
+        Log.d(TAG, "显示预览动画: 源=" + dragSourceIndex + ", 目标=" + targetIndex);
+        
+        // 创建临时数组保存当前状态
+        ArrayList<Cell> tempCells = new ArrayList<>(cells);
+        
+        // 记录需要预览动画的单元格
+        ArrayList<Integer> cellsToAnimate = new ArrayList<>();
+        
+        if (targetIndex > dragSourceIndex) {
+            // 向后移动: 目标位置比源位置大
+            for (int i = dragSourceIndex + 1; i <= targetIndex; i++) {
+                if (!tempCells.get(i).getTag().equals("empty")) {
+                    cellsToAnimate.add(i);
+                }
+            }
+        } else {
+            // 向前移动: 目标位置比源位置小
+            for (int i = targetIndex; i < dragSourceIndex; i++) {
+                if (!tempCells.get(i).getTag().equals("empty")) {
+                    cellsToAnimate.add(i);
+                }
+            }
+        }
+        
+        // 应用预览动画
+        applyPreviewAnimations(tempCells, cellsToAnimate, dragSourceIndex, targetIndex);
+    }
+    
+    /**
+     * 应用预览动画效果
+     */
+    private void applyPreviewAnimations(ArrayList<Cell> originalCells, ArrayList<Integer> cellsToAnimate, 
+                                       int sourceIndex, int targetIndex) {
+        // 设置动画基础参数
+        long baseDuration = 200; // 预览动画的持续时间
+        final float previewAlpha = 0.7f; // 预览状态下的透明度
+        
+        // 清除之前的预览视图列表
+        previewAnimatedViews.clear();
+        
+        for (int i = 0; i < cellsToAnimate.size(); i++) {
+            Integer originalIndex = cellsToAnimate.get(i);
+            Cell cell = originalCells.get(originalIndex);
+            if (cell.getContentView() == null || cell.getTag().equals("empty")) {
+                continue;
+            }
+            
+            View iconView = cell.getContentView();
+            previewAnimatedViews.add(iconView);
+            
+            // 找出此单元格在预览位置的坐标
+            int newIndex;
+            if (targetIndex > sourceIndex) {
+                // 向后移动
+                newIndex = originalIndex - 1;
+            } else {
+                // 向前移动
+                newIndex = originalIndex + 1;
+            }
+            
+            // 计算原位置和新位置的坐标差
+            int fromColumn = originalIndex % columns;
+            int fromRow = originalIndex / columns;
+            int toColumn = newIndex % columns;
+            int toRow = newIndex / columns;
+            
+            float fromX = fromColumn * per_cell_width;
+            float fromY = fromRow * per_cell_height;
+            float toX = toColumn * per_cell_width;
+            float toY = toRow * per_cell_height;
+            
+            // 添加延迟效果
+            long delay = i * 20;
+            
+            // 设置硬件加速提高动画性能
+            iconView.setLayerType(LAYER_TYPE_HARDWARE, null);
+            
+            // 保存原始Z轴高度
+            float originalZ = iconView.getZ();
+            
+            // 应用预览动画
+            iconView.animate()
+                .translationX(toX - fromX)
+                .translationY(toY - fromY)
+                .alpha(previewAlpha)
+                .scaleX(0.9f)
+                .scaleY(0.9f)
+                .setStartDelay(delay)
+                .setDuration(baseDuration)
+                .setInterpolator(new DecelerateInterpolator())
+                .start();
+        }
+    }
+    
+    /**
+     * 取消预览动画效果，将图标恢复到原始位置
+     */
+    private void cancelPreviewAnimations() {
+        // 循环恢复所有预览中的视图
+        for (View view : previewAnimatedViews) {
+            if (view != null) {
+                view.animate()
+                    .translationX(0)
+                    .translationY(0)
+                    .alpha(1.0f)
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .setDuration(150)
+                    .setInterpolator(new OvershootInterpolator(0.7f))
+                    .start();
+            }
+        }
+        
+        // 清空预览视图列表
+        previewAnimatedViews.clear();
+    }
+
+    /**
+     * 弹出应用快捷方式或应用选项菜单
+     */
+    private void showAppShortcuts(View anchor, String packageName) {
+        if ("empty".equals(packageName) || isInDragging) {
+            return;
+        }
+        
+        // 如果正在拖拽，不显示菜单
+        if (isDragging) {
+            return;
+        }
+        
+        Context context = anchor.getContext();
+        LauncherApps launcherApps = null;
+        List<ShortcutInfo> shortcuts = null;
+        
+        // 获取应用快捷方式
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
+            launcherApps = (LauncherApps) context.getSystemService(Context.LAUNCHER_APPS_SERVICE);
+            ShortcutQuery query = new ShortcutQuery();
+            query.setPackage(packageName);
+            query.setQueryFlags(ShortcutQuery.FLAG_MATCH_DYNAMIC
+                                | ShortcutQuery.FLAG_MATCH_MANIFEST
+                                | ShortcutQuery.FLAG_MATCH_PINNED);
+            try {
+                shortcuts = launcherApps.getShortcuts(query, Process.myUserHandle());
+            } catch (Exception e) {
+                shortcuts = null;
+            }
+        }
+        
+        // 获取应用信息
+        String appName = "";
+        Drawable appIcon = null;
+        
+        try {
+            PackageManager pm = context.getPackageManager();
+            ApplicationInfo ai = pm.getApplicationInfo(packageName, 0);
+            appName = pm.getApplicationLabel(ai).toString();
+            appIcon = pm.getApplicationIcon(packageName);
+        } catch (Exception e) {
+            // 如果无法获取应用信息，使用默认值
+            appName = packageName;
+            appIcon = context.getResources().getDrawable(android.R.drawable.sym_def_app_icon);
+        }
+        
+        // 隐藏之前的菜单
+        if (currentPopupMenu != null) {
+            currentPopupMenu.dismiss();
+            currentPopupMenu = null;
+        }
+        
+        // 创建自定义快捷菜单
+        ShortcutMenuView menuView = new ShortcutMenuView(
+                context, 
+                packageName, 
+                appName, 
+                appIcon, 
+                shortcuts
+        );
+        
+        // 设置监听器
+        menuView.setOnDismissListener(() -> {
+            // 菜单消失时的回调
+            if (currentPopupMenu != null) {
+                currentPopupMenu = null;
+            }
+            
+            // 恢复视图可见性，但不在拖拽开始时恢复
+            if (anchor.getVisibility() == View.INVISIBLE && !isDragging) {
+                anchor.setVisibility(View.VISIBLE);
+            }
+        });
+        
+        // 设置拖拽开始监听器
+        menuView.setDragStartListener(new ShortcutMenuView.DragStartListener() {
+            @Override
+            public void onDragStart(View view, String pkgName) {
+                // 在开始拖拽前取消菜单
+                menuView.dismiss();
+                // 开始拖拽
+                startDragFromShortcutMenu(view, pkgName);
+            }
+        });
+        
+        // 显示新菜单
+        menuView.show(anchor);
+        currentPopupMenu = new PopupMenu(context, anchor); // 保存菜单引用
+    }
+    
+    /**
+     * 从快捷菜单发起拖拽操作
+     */
+    private void startDragFromShortcutMenu(View view, String packageName) {
+        // 查找对应的Cell
+        Cell targetCell = null;
+        for (Cell cell : cells) {
+            if (cell.getTag().equals(packageName)) {
+                targetCell = cell;
+                break;
+            }
+        }
+        
+        if (targetCell == null || targetCell.getContentView() == null) {
+            Log.e(TAG, "找不到要拖拽的单元格: " + packageName);
+            return;
+        }
+        
+        // 设置拖拽标志
+        isDragging = true;
+        
+        // 创建拖拽数据
+        ClipData dragData = new ClipData(
+                packageName,
+                new String[] { ClipDescription.MIMETYPE_TEXT_PLAIN },
+                new ClipData.Item(packageName)
+        );
+        
+        // 创建拖拽阴影
+        View contentView = targetCell.getContentView();
+        View.DragShadowBuilder shadowBuilder = new View.DragShadowBuilder(contentView) {
+            @Override
+            public void onProvideShadowMetrics(Point outShadowSize, Point outShadowTouchPoint) {
+                super.onProvideShadowMetrics(outShadowSize, outShadowTouchPoint);
+                
+                // 增加拖拽阴影尺寸，使其更为明显
+                outShadowSize.x = (int)(outShadowSize.x * 1.1f);
+                outShadowSize.y = (int)(outShadowSize.y * 1.1f);
+                
+                // 调整拖拽阴影的触摸点为中心
+                outShadowTouchPoint.set(outShadowSize.x / 2, outShadowSize.y / 2);
+            }
+            
+            @Override
+            public void onDrawShadow(Canvas canvas) {
+                // 增强拖拽时的阴影效果
+                canvas.save();
+                
+                // 应用缩放效果，使阴影略大于原始图标
+                float scale = 0.95f;
+                canvas.scale(scale, scale, canvas.getWidth()/2f, canvas.getHeight()/2f);
+                
+                // 平移效果，使阴影稍微上移
+                canvas.translate(0, -8);
+                
+                // 绘制原始视图作为阴影
+                super.onDrawShadow(canvas);
+                
+                canvas.restore();
+            }
+        };
+        
+        // 开始拖拽操作
+        contentView.startDragAndDrop(
+                dragData,
+                shadowBuilder,
+                targetCell, // 传递Cell对象作为本地状态
+                View.DRAG_FLAG_OPAQUE
+        );
+        
+        // 临时隐藏原视图
+        contentView.setVisibility(View.INVISIBLE);
+        
+        // 设置当前拖拽的单元格
+        currentDragCell = targetCell;
+        
+        // 查找拖拽源单元格的索引
+        for (int i = 0; i < cells.size(); i++) {
+            if (cells.get(i) == targetCell) {
+                dragSourceIndex = i;
+                break;
+            }
+        }
+        
+        // 显示拖拽指示器
+        ViewParent parent = getParent();
+        if (parent instanceof ViewGroup) {
+            showDragIndicators((View) parent);
+        }
+    }
+
+    /**
+     * 从单元格直接开始拖拽
+     */
+    private void startDragFromCell(Cell cell) {
+        if (cell == null || cell.getContentView() == null) return;
+        
+        View contentView = cell.getContentView();
+        String packageName = cell.getTag();
+        
+        // 设置拖拽标志
+        isDragging = true;
+        isInDragging = true;
+        
+        // 完全清除高亮
+        highLightValid = false;
+        highlightAlpha = 0f;
+        targetHighlightAlpha = 0f;
+        
+        // 立即强制重绘以清除任何高亮框
+        invalidate();
+        
+        // 创建拖拽数据
+        ClipData dragData = new ClipData(
+                packageName,
+                new String[] { ClipDescription.MIMETYPE_TEXT_PLAIN },
+                new ClipData.Item(packageName)
+        );
+        
+        // 创建拖拽阴影
+        View.DragShadowBuilder shadowBuilder = new View.DragShadowBuilder(contentView) {
+            @Override
+            public void onProvideShadowMetrics(Point outShadowSize, Point outShadowTouchPoint) {
+                super.onProvideShadowMetrics(outShadowSize, outShadowTouchPoint);
+                
+                // 增加拖拽阴影尺寸，使其更为明显
+                outShadowSize.x = (int)(outShadowSize.x * 1.1f);
+                outShadowSize.y = (int)(outShadowSize.y * 1.1f);
+                
+                // 调整拖拽阴影的触摸点为中心
+                outShadowTouchPoint.set(outShadowSize.x / 2, outShadowSize.y / 2);
+            }
+            
+            @Override
+            public void onDrawShadow(Canvas canvas) {
+                // 增强拖拽时的阴影效果
+                canvas.save();
+                
+                // 应用缩放效果，使阴影略大于原始图标
+                float scale = 0.95f;
+                canvas.scale(scale, scale, canvas.getWidth()/2f, canvas.getHeight()/2f);
+                
+                // 平移效果，使阴影稍微上移
+                canvas.translate(0, -8);
+                
+                // 绘制原始视图作为阴影
+                super.onDrawShadow(canvas);
+                
+                canvas.restore();
+            }
+        };
+        
+        // 开始拖拽操作
+        contentView.startDragAndDrop(
+                dragData,
+                shadowBuilder,
+                cell, // 传递Cell对象作为本地状态
+                View.DRAG_FLAG_OPAQUE
+        );
+        
+        // 临时隐藏原视图
+        contentView.setVisibility(View.INVISIBLE);
+        
+        // 设置当前拖拽的单元格
+        currentDragCell = cell;
+        
+        // 查找拖拽源单元格的索引
+        for (int i = 0; i < cells.size(); i++) {
+            if (cells.get(i) == cell) {
+                dragSourceIndex = i;
+                break;
+            }
+        }
+        
+        // 显示拖拽指示器
+        ViewParent parent = getParent();
+        if (parent instanceof ViewGroup) {
+            showDragIndicators((View) parent);
+        }
+    }
 }

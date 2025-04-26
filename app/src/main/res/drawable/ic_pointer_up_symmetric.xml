@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="12dp"
+    android:viewportWidth="24"
+    android:viewportHeight="12">
+    
+    <!-- 阴影效果 -->
+    <path
+        android:fillColor="#20000000"
+        android:pathData="M-0.5,12.5 L12,0 L24.5,12.5z"/>
+    
+    <!-- 主三角形 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M0,12 L12,0 L24,12z"/>
+</vector> 

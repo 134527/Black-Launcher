@@ -10,17 +10,17 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Point;
-import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.text.TextUtils;
 import android.util.Log;
 import android.util.Pair;
@@ -30,25 +30,25 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-
+import android.view.WindowManager;
+import android.view.animation.AccelerateDecelerateInterpolator;
+import android.view.animation.OvershootInterpolator;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.app.WallpaperManager;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager2.widget.ViewPager2;
 
 import com.google.gson.Gson;
 import com.google.gson.annotations.Expose;
 import com.google.gson.reflect.TypeToken;
 import com.msk.blacklauncher.R;
-import com.msk.blacklauncher.Utils.IconUtils;
+import com.msk.blacklauncher.utils.IconUtils;
 import com.msk.blacklauncher.adapters.WorkspaceAdapter;
-import com.msk.blacklauncher.adapters.WorkspacePagerAdapter;
 import com.msk.blacklauncher.model.AppModel;
 import com.msk.blacklauncher.view.CellLayout;
 
@@ -71,6 +71,24 @@ public class WorkspaceFragment extends Fragment {
     private static final String TAG = "WorkspaceFragment";
     private volatile boolean isHandlingOverflow = false;
 
+    private static final int VIBRATION_DRAG_START = 50; // 拖拽开始的振动时长(ms)
+    private static final int VIBRATION_DRAG_END = 35; // 拖拽结束的振动时长(ms)
+    private static final int VIBRATION_DRAG_MOVE = 15; // 拖拽移动的振动时长(ms)
+    
+    private Vibrator vibrator;
+
+    // 添加UI状态变化监听常量
+    private static final int SYSTEM_UI_IMMERSIVE_FLAGS = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+            | View.SYSTEM_UI_FLAG_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+            
+    private static final long HIDE_UI_DELAY_MS = 100; // 延迟隐藏UI的时间（毫秒）
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable hideSystemUIRunnable = this::hideSystemUI;
+
     private static class SerializableAppPosition {
         @Expose
         private String packageName;
@@ -90,6 +108,9 @@ public class WorkspaceFragment extends Fragment {
         public int getPositionInPage() { return positionInPage; }
     }
 
+    private boolean isNavigationBarVisible = false;
+    private View decorView;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -101,6 +122,12 @@ public class WorkspaceFragment extends Fragment {
         filter.addDataScheme("package");
 
         requireActivity().registerReceiver(appChangeReceiver, filter);
+
+        // 获取系统振动服务
+        vibrator = (Vibrator) requireContext().getSystemService(Context.VIBRATOR_SERVICE);
+        
+        // 获取DecorView用于监控导航栏状态
+        decorView = requireActivity().getWindow().getDecorView();
     }
 
     @Override
@@ -198,6 +225,12 @@ public class WorkspaceFragment extends Fragment {
                 // 设置工作区页面
                 WorkspaceFragment.this.setupWorkspacePage(pageIndex);
             }
+            
+            @Override
+            public int getPageCount() {
+                // 返回工作区页面数量
+                return workspaceCells != null ? workspaceCells.size() : 0;
+            }
         }));
 
         // 手动设置页面指示器 - 总共2页，当前是第1页（索引从0开始）
@@ -221,7 +254,81 @@ public class WorkspaceFragment extends Fragment {
             }
         });
 
+        // 监控UI可见性变化
+        decorView.setOnSystemUiVisibilityChangeListener(visibility -> {
+            // 检查导航栏和状态栏是否隐藏
+            boolean isImmersiveModeEnabled = (visibility & View.SYSTEM_UI_FLAG_FULLSCREEN) != 0;
+            isNavigationBarVisible = (visibility & View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) == 0;
+            
+            Log.d(TAG, "系统UI可见性变化: " + visibility + ", 导航栏可见: " + isNavigationBarVisible + 
+                      ", 全屏模式: " + isImmersiveModeEnabled);
+            
+            // 如果导航栏显示，尝试恢复全屏状态
+            if (!isImmersiveModeEnabled || isNavigationBarVisible) {
+                // 移除之前的回调，避免重复
+                uiHandler.removeCallbacks(hideSystemUIRunnable);
+                // 延迟执行，避免与系统冲突
+                uiHandler.postDelayed(hideSystemUIRunnable, HIDE_UI_DELAY_MS);
+            }
+        });
+        
+        // 设置触摸监听器，确保任何触摸操作都保持全屏状态
+        setupTouchListener(view);
+
         return view;
+    }
+
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+        
+        // 确保视图创建后进入全屏模式
+        hideSystemUI();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+
+        // 在恢复时刷新当前页面，确保文本显示正确
+        if (workspacePager != null && workspaceCells != null && !workspaceCells.isEmpty()) {
+            int currentPage = workspacePager.getCurrentItem();
+            if (currentPage >= 0 && currentPage < workspaceCells.size()) {
+                setupWorkspacePage(currentPage);
+
+                // 延迟进一步刷新，确保视图完全加载
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    if (isAdded() && !isDetached()) {
+                        setupWorkspacePage(currentPage);
+                        workspacePager.invalidate();
+                    }
+                }, 300);
+            }
+        }
+        
+        // 确保UI处于全屏状态
+        hideSystemUI();
+    }
+    
+    @Override
+    public void onPause() {
+        super.onPause();
+        // 移除待处理的隐藏UI回调
+        uiHandler.removeCallbacks(hideSystemUIRunnable);
+    }
+    
+    @Override
+    public void onStart() {
+        super.onStart();
+        // 在Fragment可见时确保全屏
+        hideSystemUI();
+    }
+    
+    @Override
+    public void onStop() {
+        super.onStop();
+        // 移除待处理的隐藏UI回调
+        uiHandler.removeCallbacks(hideSystemUIRunnable);
     }
 
     private void addNewPage() {
@@ -710,6 +817,9 @@ public class WorkspaceFragment extends Fragment {
  
         // 设置应用名称
         labelView.setText(app.getAppName());
+        
+        // 为视图设置标签数据，方便后续识别
+        appView.setTag(app);
 
         // 设置点击监听器
         appView.setOnClickListener(v -> {
@@ -731,11 +841,8 @@ public class WorkspaceFragment extends Fragment {
                 return false;
             }
 
-            // 执行触感反馈，模拟Launcher3的体验
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS,
-                        HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING);
-            }
+            // 执行高级触感反馈
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS, VIBRATION_DRAG_START);
 
             // 创建要传递的数据
             ClipData dragData = new ClipData(
@@ -750,27 +857,67 @@ public class WorkspaceFragment extends Fragment {
                 public void onProvideShadowMetrics(Point outShadowSize, Point outShadowTouchPoint) {
                     super.onProvideShadowMetrics(outShadowSize, outShadowTouchPoint);
                     
+                    // 增加拖拽阴影尺寸，更大更明显
+                    outShadowSize.x = (int)(outShadowSize.x * 1.15f);
+                    outShadowSize.y = (int)(outShadowSize.y * 1.15f);
+                    
                     // 调整触摸点在阴影中的位置，使其在图标中心
                     outShadowTouchPoint.set(outShadowSize.x / 2, outShadowSize.y / 3);
                 }
+                
+                @Override
+                public void onDrawShadow(Canvas canvas) {
+                    // 增强拖拽时的阴影效果
+                    canvas.save();
+                    
+                    // 应用缩放效果
+                    float scale = 0.92f;
+                    canvas.scale(scale, scale, canvas.getWidth()/2f, canvas.getHeight()/2f);
+                    
+                    // 平移效果，使阴影稍微上移
+                    canvas.translate(0, -12);
+                    
+                    // 绘制原始视图作为阴影
+                    super.onDrawShadow(canvas);
+                    
+                    canvas.restore();
+                }
             };
-
-            // 开始拖拽操作
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                v.startDragAndDrop(
-                        dragData,
-                        shadowBuilder,
-                        new CellLayout.Cell(app.getPackageName(), v), // 传递Cell对象作为本地状态
-                        View.DRAG_FLAG_OPAQUE
-                );
-            } else {
-                v.startDrag(
-                        dragData,
-                        shadowBuilder,
-                        new CellLayout.Cell(app.getPackageName(), v),
-                        View.DRAG_FLAG_OPAQUE
-                );
-            }
+            
+            // 拖拽前应用弹性动画效果（使用OvershootInterpolator实现更生动的弹性效果）
+            v.animate()
+                .scaleX(1.15f)
+                .scaleY(1.15f)
+                .alpha(0.9f)
+                .setInterpolator(new OvershootInterpolator(1.2f))
+                .setDuration(180)
+                .withEndAction(() -> {
+                    // 开始拖拽操作
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        v.startDragAndDrop(
+                                dragData,
+                                shadowBuilder,
+                                new CellLayout.Cell(app.getPackageName(), v), // 传递Cell对象作为本地状态
+                                View.DRAG_FLAG_OPAQUE
+                        );
+                    } else {
+                        v.startDrag(
+                                dragData,
+                                shadowBuilder,
+                                new CellLayout.Cell(app.getPackageName(), v),
+                                View.DRAG_FLAG_OPAQUE
+                        );
+                    }
+                    
+                    // 临时隐藏原视图
+                    v.setVisibility(View.INVISIBLE);
+                    
+                    // 还原视图的缩放和透明度
+                    v.setScaleX(1.0f);
+                    v.setScaleY(1.0f);
+                    v.setAlpha(1.0f);
+                })
+                .start();
 
             return true;
         });
@@ -778,24 +925,36 @@ public class WorkspaceFragment extends Fragment {
         return appView;
     }
 
-    @Override
-    public void onResume() {
-        super.onResume();
-
-        // 在恢复时刷新当前页面，确保文本显示正确
-        if (workspacePager != null && workspaceCells != null && !workspaceCells.isEmpty()) {
-            int currentPage = workspacePager.getCurrentItem();
-            if (currentPage >= 0 && currentPage < workspaceCells.size()) {
-                setupWorkspacePage(currentPage);
-
-                // 延迟进一步刷新，确保视图完全加载
-                new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    if (isAdded() && !isDetached()) {
-                        setupWorkspacePage(currentPage);
-                        workspacePager.invalidate();
-                    }
-                }, 300);
+    /**
+     * 提供统一的触感反馈方法，根据不同设备特性提供最佳体验
+     */
+    private void performHapticFeedback(int feedbackConstant, int vibrationDuration) {
+        try {
+            // 尝试使用系统内置的触感反馈
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                View view = getView();
+                if (view != null) {
+                    view.performHapticFeedback(feedbackConstant, 
+                            HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING | 
+                            HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
+                }
             }
+            
+            // 如果是Android O及以上版本，使用更精细的振动效果
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator != null && vibrator.hasVibrator()) {
+                int amplitude = 
+                    vibrationDuration == VIBRATION_DRAG_START ? 255 :
+                    vibrationDuration == VIBRATION_DRAG_END ? 175 : 80;
+                
+                VibrationEffect effect = VibrationEffect.createOneShot(vibrationDuration, amplitude);
+                vibrator.vibrate(effect);
+            } 
+            // 兼容旧版本
+            else if (vibrator != null && vibrator.hasVibrator()) {
+                vibrator.vibrate(vibrationDuration);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "执行触感反馈失败", e);
         }
     }
 
@@ -832,6 +991,34 @@ public class WorkspaceFragment extends Fragment {
                     CellLayout.Cell emptyCell = new CellLayout.Cell("empty", emptyView);
                     sourcePage.set(i, emptyCell);
                     needRemoveFromSource = true;
+                    
+                    // 添加移除时的触感反馈
+                    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, VIBRATION_DRAG_MOVE);
+                    
+                    // 添加动画效果
+                    if (isAdded() && !isDetached()) {
+                        View oldCellView = getViewForPage(fromPage);
+                        if (oldCellView != null) {
+                            new Handler(Looper.getMainLooper()).post(() -> {
+                                setupWorkspacePage(fromPage);
+                                oldCellView.animate()
+                                    .alpha(0.7f)
+                                    .scaleX(0.95f)
+                                    .scaleY(0.95f)
+                                    .setInterpolator(new AccelerateDecelerateInterpolator())
+                                    .setDuration(150)
+                                    .withEndAction(() -> {
+                                        oldCellView.animate()
+                                            .alpha(1.0f)
+                                            .scaleX(1.0f)
+                                            .scaleY(1.0f)
+                                            .setDuration(200)
+                                            .start();
+                                    })
+                                    .start();
+                            });
+                        }
+                    }
                     break;
                 }
             }
@@ -881,6 +1068,11 @@ public class WorkspaceFragment extends Fragment {
             View appView = createAppIconView(app);
             if (appView == null) return;
             
+            // 设置初始动画属性
+            appView.setScaleX(1.1f);
+            appView.setScaleY(1.1f);
+            appView.setAlpha(0.7f);
+            
             // 创建单元格并替换目标位置
             CellLayout.Cell appCell = new CellLayout.Cell(packageName, appView);
             CellLayout.Cell originalCell = targetPage.get(positionInPage);
@@ -901,6 +1093,43 @@ public class WorkspaceFragment extends Fragment {
             // 设置新单元格到目标位置
             targetPage.set(positionInPage, appCell);
             
+            // 刷新目标页面视图
+            View targetPageView = getViewForPage(targetPageIndex);
+            
+            // 播放放置动画
+            if (targetPageView != null) {
+                int finalTargetPageIndex = targetPageIndex;
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    setupWorkspacePage(finalTargetPageIndex);
+                    
+                    // 提供放置时的触感反馈
+                    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, VIBRATION_DRAG_END);
+                    
+                    // 添加图标放置动画效果 - 使用OvershootInterpolator实现更生动的放置效果
+                    appView.animate()
+                        .scaleX(1.0f)
+                        .scaleY(1.0f)
+                        .alpha(1.0f)
+                        .setInterpolator(new OvershootInterpolator(0.8f))
+                        .setDuration(300)
+                        .start();
+                    
+                    // 页面微震动动画
+                    targetPageView.animate()
+                        .scaleX(0.98f)
+                        .scaleY(0.98f)
+                        .setDuration(120)
+                        .withEndAction(() -> {
+                            targetPageView.animate()
+                                .scaleX(1.0f)
+                                .scaleY(1.0f)
+                                .setInterpolator(new OvershootInterpolator(0.3f))
+                                .setDuration(180)
+                                .start();
+                        }).start();
+                });
+            }
+            
             // 刷新视图
             setupWorkspacePage(targetPageIndex);
             if (needRemoveFromSource && fromPage >= 0 && fromPage != targetPageIndex) {
@@ -910,6 +1139,32 @@ public class WorkspaceFragment extends Fragment {
             // 保存更新后的位置
             saveAppPositions();
         }
+    }
+
+    /**
+     * 获取指定页面的视图
+     */
+    private View getViewForPage(int pageIndex) {
+        if (workspacePager == null) return null;
+        
+        // 尝试通过tag查找页面视图
+        View pageView = workspacePager.findViewWithTag("page_" + pageIndex);
+        
+        // 如果找不到，则通过RecyclerView查找
+        if (pageView == null && workspacePager.getChildAt(0) instanceof RecyclerView) {
+            RecyclerView recyclerView = (RecyclerView) workspacePager.getChildAt(0);
+            
+            // 遍历可见的子视图
+            for (int i = 0; i < recyclerView.getChildCount(); i++) {
+                View child = recyclerView.getChildAt(i);
+                if (child.getTag() != null && child.getTag().equals("page_" + pageIndex)) {
+                    pageView = child;
+                    break;
+                }
+            }
+        }
+        
+        return pageView;
     }
 
     /**
@@ -947,5 +1202,39 @@ public class WorkspaceFragment extends Fragment {
         }
         
         return -1;
+    }
+
+    /**
+     * 隐藏系统UI元素，包括状态栏和导航栏
+     */
+    private void hideSystemUI() {
+        if (isAdded() && !isDetached() && getActivity() != null) {
+            View decorView = getActivity().getWindow().getDecorView();
+            
+            Log.d(TAG, "强制进入全屏模式");
+            
+            // 添加窗口标志
+            getActivity().getWindow().addFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS |
+                WindowManager.LayoutParams.FLAG_FULLSCREEN
+            );
+            
+            // 设置系统UI可见性标志
+            decorView.setSystemUiVisibility(SYSTEM_UI_IMMERSIVE_FLAGS);
+        }
+    }
+    
+    /**
+     * 一旦触摸屏幕任何位置，就确保全屏模式
+     * 在FragmentWorkspace的布局根元素添加此监听
+     */
+    private void setupTouchListener(View rootView) {
+        rootView.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                // 在触摸开始时确保全屏
+                hideSystemUI();
+            }
+            return false; // 不消费事件，让其继续传递
+        });
     }
 }

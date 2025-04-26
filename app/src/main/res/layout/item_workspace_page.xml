@@ -1,19 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/workspace_page"
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/transparent">
-
-    <!-- 使用 CellLayout 替代 GridLayout 以获得更好的单元格管理 -->
+    
     <com.msk.blacklauncher.view.CellLayout
         android:id="@+id/workspace_grid"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:padding="16dp"
-        android:clipChildren="false"
-        android:clipToPadding="false" />
+        android:layout_gravity="center" />
         
     <!-- 拖拽接收区域指示器 - 当拖拽时显示 -->
     <View
@@ -32,4 +28,4 @@
         android:background="#33FFFFFF"
         android:visibility="gone" />
 
-</RelativeLayout>
+</FrameLayout>
