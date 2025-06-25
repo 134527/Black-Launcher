@@ -70,6 +70,7 @@ dependencies {
     implementation ("com.github.li-xiaojun:XPopup:2.10.0")
     implementation ("com.google.android.material:material:1.4.0")
     implementation ("androidx.recyclerview:recyclerview:1.2.1")
+    compileOnly(files("E:\\JryO\\Black-Launcher\\app\\libs\\framework.jar"))
 
 
     testImplementation(libs.junit)

@@ -944,9 +944,16 @@ public class HomeFragment extends Fragment {
     }
 
     private void openWallpaperChooser() {
-        // 使用系统壁纸选择器
+        // 打开自定义壁纸选择器，而不是系统壁纸选择器
+        try {
+            Intent intent = new Intent(requireContext(), com.msk.blacklauncher.activities.WallpaperChooserActivity.class);
+            startActivity(intent);
+        } catch (Exception e) {
+            Log.e("HomeFragment", "启动壁纸选择器失败", e);
+            // 如果自定义壁纸选择器失败，尝试使用系统壁纸选择器
         Intent intent = new Intent(Intent.ACTION_SET_WALLPAPER);
         startActivity(Intent.createChooser(intent, "选择壁纸"));
+        }
     }
 
 
@@ -1545,7 +1552,6 @@ public class HomeFragment extends Fragment {
                                         targetGrid = appsGrid;
                                         break;
                                 }
-
                                 if (targetGrid != null) {
                                     addAppToGrid(appModel, targetGrid, cardKey);
                                     Toast.makeText(requireContext(), "已添加: " + appModel.getAppName(), Toast.LENGTH_SHORT).show();

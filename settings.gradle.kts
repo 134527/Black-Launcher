@@ -27,4 +27,3 @@ enableFeaturePreview("VERSION_CATALOGS")
 rootProject.name = "Black Launcher"
 include(":app")
 include (":library")
- 

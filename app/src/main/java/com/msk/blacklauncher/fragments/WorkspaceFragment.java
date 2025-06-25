@@ -199,6 +199,9 @@ public class WorkspaceFragment extends Fragment {
         if (workspaceCells.isEmpty()) {
             workspaceCells.add(createEmptyPage());
         }
+        
+        // 设置手势监听，处理滑动返回
+        setupWorkspaceGestures(view);
 
         // 设置页面适配器和CellLayout监听器
         workspacePager.setAdapter(new WorkspaceAdapter(new CellLayout.OnCellOverflowListener() {
@@ -212,6 +215,15 @@ public class WorkspaceFragment extends Fragment {
             public void onCellSwapped(CellLayout.Cell draggingCell, int fromPage, int toPage, int targetColumn, int targetRow) {
                 // 处理跨页面拖拽
                 handleCellSwap(draggingCell, fromPage, toPage, targetColumn, targetRow);
+                
+                // 检查是否需要删除空白页面
+                if (fromPage >= 0 && fromPage < workspaceCells.size() && 
+                    fromPage != toPage && isPageEmpty(fromPage)) {
+                    // 如果源页面为空且不是第一页，删除源页面
+                    if (fromPage > 0) {
+                        removePage(fromPage);
+                    }
+                }
             }
 
             @Override
@@ -228,8 +240,97 @@ public class WorkspaceFragment extends Fragment {
             
             @Override
             public int getPageCount() {
-                // 返回工作区页面数量
                 return workspaceCells != null ? workspaceCells.size() : 0;
+            }
+            
+            @Override
+            public int createNewPage() {
+                // 创建一个新的空白页面
+                List<CellLayout.Cell> newPage = createEmptyPage();
+                
+                // 添加到页面列表
+                workspaceCells.add(newPage);
+                
+                // 更新页面指示器
+                initPageIndicator();
+                
+                // 通知适配器更新
+                if (workspacePager.getAdapter() != null) {
+                    workspacePager.getAdapter().notifyItemInserted(workspaceCells.size() - 1);
+                }
+                
+                // 返回新页面的索引
+                return workspaceCells.size() - 1;
+            }
+            
+            @Override
+            public boolean canCreateNewPage() {
+                // 检查是否已达到最大页面数
+                return workspaceCells != null && workspaceCells.size() < 5; // 限制最多5个页面
+            }
+
+            @Override
+            public int requestNewPageAndMoveItem(CellLayout.Cell cellToMove, int fromPageIndex) {
+                if (workspaceCells == null || cellToMove == null) {
+                    return -1;
+                }
+                
+                try {
+                    // 确保未超过最大页面数限制
+                    if (workspaceCells.size() >= 5) {
+                        return -1;
+                    }
+                    
+                    // 创建新页面
+                    List<CellLayout.Cell> newPage = createEmptyPage();
+                    
+                    // 将项目放在新页面的第一个位置
+                    newPage.set(0, cellToMove);
+                    
+                    // 确定插入位置（通常是末尾）
+                    int newPageIndex = workspaceCells.size();
+                    
+                    // 添加新页面
+                    workspaceCells.add(newPage);
+                    
+                    // 更新页面指示器
+                    initPageIndicator();
+                    
+                    // 通知适配器更新
+                    if (workspacePager.getAdapter() != null) {
+                        workspacePager.getAdapter().notifyItemInserted(newPageIndex);
+                    }
+                    
+                    // 保存应用位置
+                    saveAppPositions();
+                    
+                    // 返回新页面的索引
+                    return newPageIndex;
+                } catch (Exception e) {
+                    Log.e(TAG, "创建新页面失败", e);
+                    return -1;
+                }
+            }
+
+            @Override
+            public boolean isPageEmpty(int pageIndex) {
+                // 调用Fragment的isPageEmpty方法
+                return WorkspaceFragment.this.isPageEmpty(pageIndex);
+            }
+            
+            @Override
+            public void removePage(int pageIndex) {
+                // 调用Fragment的removePage方法
+                WorkspaceFragment.this.removePage(pageIndex);
+            }
+
+            @Override
+            public List<CellLayout.Cell> getPageCells(int pageIndex) {
+                // 获取指定页面的单元格列表
+                if (pageIndex >= 0 && pageIndex < workspaceCells.size()) {
+                    return workspaceCells.get(pageIndex);
+                }
+                return null;
             }
         }));
 
@@ -259,7 +360,6 @@ public class WorkspaceFragment extends Fragment {
             // 检查导航栏和状态栏是否隐藏
             boolean isImmersiveModeEnabled = (visibility & View.SYSTEM_UI_FLAG_FULLSCREEN) != 0;
             isNavigationBarVisible = (visibility & View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) == 0;
-            
             Log.d(TAG, "系统UI可见性变化: " + visibility + ", 导航栏可见: " + isNavigationBarVisible + 
                       ", 全屏模式: " + isImmersiveModeEnabled);
             
@@ -404,6 +504,7 @@ public class WorkspaceFragment extends Fragment {
                     Log.d(TAG, "已从工作区移除应用: " + packageName);
                     break;
                 }
+
             }
             if (removed) break;
         }
@@ -454,17 +555,56 @@ public class WorkspaceFragment extends Fragment {
                         int targetPage = emptyPosition.first;
                         int targetPos = emptyPosition.second;
 
-                        workspaceCells.get(targetPage).set(targetPos, overflowCell);
+                        Log.d(TAG, "找到空位置：页面 " + targetPage + ", 位置 " + targetPos);
+                        
+                        // 保存原来的视图状态
+                        View contentView = overflowCell.getContentView();
+                        String packageName = overflowCell.getTag();
+                        
+                        // 创建单元格
+                        CellLayout.Cell crossPageCell = new CellLayout.Cell(packageName, contentView);
+                        
+                        // 设置为跨页拖拽
+                        crossPageCell.setTag(packageName + ":cross_page:" + pageIndex);
+                        
+                        // 放置到目标页面
+                        workspaceCells.get(targetPage).set(targetPos, crossPageCell);
 
                         saveAppPositions();
 
                         if (workspacePager != null && workspacePager.getAdapter() != null) {
                             workspacePager.getAdapter().notifyItemChanged(targetPage);
+                            
+                            // 平滑滚动到目标页面
                             workspacePager.setCurrentItem(targetPage, true);
+                            
+                            // 添加页面过渡动画
+                            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                if (isAdded() && !isDetached()) {
+                                    setupWorkspacePage(targetPage);
+                                    
+                                    // 获取视图并添加动画效果
+                                    View targetView = getViewForPage(targetPage);
+                                    if (targetView != null) {
+                                        // 应用进入动画
+                                        targetView.setAlpha(0.9f);
+                                        targetView.animate()
+                                            .alpha(1.0f)
+                                            .setDuration(200)
+                                            .start();
+                                    }
+                                }
+                            }, 100);
                         }
                     } else if (workspaceCells.size() < 5) {
+                        // 添加新页面
+                        Log.d(TAG, "创建新页面");
                         List<CellLayout.Cell> newPage = createEmptyPage();
+                        
+                        // 将溢出单元格放在新页面的第一个位置
                         newPage.set(0, overflowCell);
+                        
+                        // 添加新页面
                         workspaceCells.add(newPage);
 
                         saveAppPositions();
@@ -474,9 +614,38 @@ public class WorkspaceFragment extends Fragment {
                             int newPageIndex = workspaceCells.size() - 1;
                             workspacePager.getAdapter().notifyItemInserted(newPageIndex);
 
+                            // 这里添加延迟是为了确保页面完全创建后再切换
                             new Handler().postDelayed(() -> {
                                 if (isAdded() && !isDetached()) {
+                                    // 平滑滚动到新页面
                                     workspacePager.setCurrentItem(newPageIndex, true);
+                                    
+                                    // 添加页面创建和进入动画
+                                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                        if (isAdded() && !isDetached()) {
+                                            setupWorkspacePage(newPageIndex);
+                                            
+                                            // 获取视图并添加动画效果
+                                            View newPageView = getViewForPage(newPageIndex);
+                                            if (newPageView != null) {
+                                                // 应用进入动画
+                                                newPageView.setScaleX(0.9f);
+                                                newPageView.setScaleY(0.9f);
+                                                newPageView.setAlpha(0.8f);
+                                                
+                                                newPageView.animate()
+                                                    .scaleX(1.0f)
+                                                    .scaleY(1.0f)
+                                                    .alpha(1.0f)
+                                                    .setDuration(300)
+                                                    .setInterpolator(new OvershootInterpolator(0.8f))
+                                                    .start();
+                                                    
+                                                // 额外的提示动画
+                                                Toast.makeText(requireContext(), "已创建新页面", Toast.LENGTH_SHORT).show();
+                                            }
+                                        }
+                                    }, 200);
                                 }
                             }, 100);
                         }
@@ -857,9 +1026,9 @@ public class WorkspaceFragment extends Fragment {
                 public void onProvideShadowMetrics(Point outShadowSize, Point outShadowTouchPoint) {
                     super.onProvideShadowMetrics(outShadowSize, outShadowTouchPoint);
                     
-                    // 增加拖拽阴影尺寸，更大更明显
-                    outShadowSize.x = (int)(outShadowSize.x * 1.15f);
-                    outShadowSize.y = (int)(outShadowSize.y * 1.15f);
+                    // 不增加拖拽阴影尺寸，保持原始大小
+                    // outShadowSize.x = (int)(outShadowSize.x * 1.15f);
+                    // outShadowSize.y = (int)(outShadowSize.y * 1.15f);
                     
                     // 调整触摸点在阴影中的位置，使其在图标中心
                     outShadowTouchPoint.set(outShadowSize.x / 2, outShadowSize.y / 3);
@@ -870,9 +1039,9 @@ public class WorkspaceFragment extends Fragment {
                     // 增强拖拽时的阴影效果
                     canvas.save();
                     
-                    // 应用缩放效果
-                    float scale = 0.92f;
-                    canvas.scale(scale, scale, canvas.getWidth()/2f, canvas.getHeight()/2f);
+                    // 移除缩放效果，保持原始大小
+                    // float scale = 0.92f;
+                    // canvas.scale(scale, scale, canvas.getWidth()/2f, canvas.getHeight()/2f);
                     
                     // 平移效果，使阴影稍微上移
                     canvas.translate(0, -12);
@@ -886,8 +1055,8 @@ public class WorkspaceFragment extends Fragment {
             
             // 拖拽前应用弹性动画效果（使用OvershootInterpolator实现更生动的弹性效果）
             v.animate()
-                .scaleX(1.15f)
-                .scaleY(1.15f)
+                .scaleX(1.0f)
+                .scaleY(1.0f)
                 .alpha(0.9f)
                 .setInterpolator(new OvershootInterpolator(1.2f))
                 .setDuration(180)
@@ -945,6 +1114,7 @@ public class WorkspaceFragment extends Fragment {
                 int amplitude = 
                     vibrationDuration == VIBRATION_DRAG_START ? 255 :
                     vibrationDuration == VIBRATION_DRAG_END ? 175 : 80;
+
                 
                 VibrationEffect effect = VibrationEffect.createOneShot(vibrationDuration, amplitude);
                 vibrator.vibrate(effect);
@@ -971,6 +1141,29 @@ public class WorkspaceFragment extends Fragment {
         
         // 获取拖拽的应用信息
         String packageName = draggingCell.getTag();
+        
+        // 检查是否是跨页面拖拽
+        boolean isCrossPageDrag = packageName != null && packageName.contains(":cross_page");
+        int originalFromPage = fromPage;
+        
+        // 如果是跨页拖拽，提取原始包名和真实源页面
+        if (isCrossPageDrag) {
+            String[] parts = packageName.split(":");
+            if (parts.length >= 3) {
+                try {
+                    packageName = parts[0]; // 恢复原始包名
+                    draggingCell.setTag(packageName); // 更新单元格标签
+                    
+                    // 更新源页面索引
+                    originalFromPage = Integer.parseInt(parts[parts.length - 1]);
+                    Log.d(TAG, "跨页拖拽: 原始来源页面=" + originalFromPage + ", 当前来源页面=" + fromPage);
+                } catch (Exception e) {
+                    Log.e(TAG, "解析跨页拖拽信息失败", e);
+                }
+            }
+        }
+        
+        // 如果包名为空或为"empty"，返回
         if (packageName == null || "empty".equals(packageName)) return;
         
         // 从当前页面中移除应用
@@ -1003,8 +1196,8 @@ public class WorkspaceFragment extends Fragment {
                                 setupWorkspacePage(fromPage);
                                 oldCellView.animate()
                                     .alpha(0.7f)
-                                    .scaleX(0.95f)
-                                    .scaleY(0.95f)
+                                    .scaleX(1.0f)
+                                    .scaleY(1.0f)
                                     .setInterpolator(new AccelerateDecelerateInterpolator())
                                     .setDuration(150)
                                     .withEndAction(() -> {
@@ -1069,8 +1262,8 @@ public class WorkspaceFragment extends Fragment {
             if (appView == null) return;
             
             // 设置初始动画属性
-            appView.setScaleX(1.1f);
-            appView.setScaleY(1.1f);
+            appView.setScaleX(1.0f);
+            appView.setScaleY(1.0f);
             appView.setAlpha(0.7f);
             
             // 创建单元格并替换目标位置
@@ -1079,14 +1272,74 @@ public class WorkspaceFragment extends Fragment {
             
             // 如果目标不是空白单元格，需要处理位置交换
             if (originalCell != null && !"empty".equals(originalCell.getTag())) {
-                // 寻找空白单元格位置
-                int emptyIndex = findEmptyCell(targetPage);
-                if (emptyIndex >= 0) {
-                    // 将原单元格移至空白位置
-                    targetPage.set(emptyIndex, originalCell);
+                // 判断是否需要处理跨页面挤出效果
+                boolean needCrossPageEffect = targetPageIndex == currentPageCount - 1 && 
+                        positionInPage == targetPage.size() - 1;
+                
+                if (needCrossPageEffect && workspaceCells.size() < 5) {
+                    // 需要创建新页面并显示挤出动画
+                    List<CellLayout.Cell> newPage = createEmptyPage();
+                    // 挤出的单元格移到新页面第一个位置
+                    newPage.set(0, originalCell);
+                    // 添加新页面
+                    workspaceCells.add(newPage);
+                    
+                    // 创建挤出动画
+                    if (isAdded() && !isDetached()) {
+                        // 保存目标单元格的视图状态
+                        View targetCellView = originalCell.getContentView();
+                        
+                        // 创建挤出动画视图（临时添加到当前页面）
+                        if (targetCellView != null) {
+                            // 复制视图位置和属性
+                            int[] location = new int[2];
+                            targetCellView.getLocationOnScreen(location);
+                            
+                            // 添加临时视图
+                            View tempView = new View(requireContext());
+                            tempView.setBackground(targetCellView.getBackground());
+                            tempView.setLayoutParams(targetCellView.getLayoutParams());
+                            
+                            // 将临时视图添加到当前页面
+                            ViewGroup currentPageView = (ViewGroup) getViewForPage(targetPageIndex);
+                            if (currentPageView != null) {
+                                currentPageView.addView(tempView);
+                                
+                                // 设置初始位置
+                                tempView.setX(targetCellView.getX());
+                                tempView.setY(targetCellView.getY());
+                                
+                                // 启动挤出动画
+                                tempView.animate()
+                                    .translationXBy(currentPageView.getWidth())
+                                    .alpha(0f)
+                                    .setDuration(300)
+                                    .setInterpolator(new AccelerateDecelerateInterpolator())
+                                    .withEndAction(() -> {
+                                        currentPageView.removeView(tempView);
+                                        
+                                        // 更新页面指示器
+                                        initPageIndicator();
+                                        
+                                        // 通知适配器更新
+                                        if (workspacePager.getAdapter() != null) {
+                                            workspacePager.getAdapter().notifyItemInserted(workspaceCells.size() - 1);
+                                        }
+                                    })
+                                    .start();
+                            }
+                        }
+                    }
                 } else {
-                    // 无空白单元格，添加到下一页
-                    handleCellOverflow(originalCell, targetPageIndex);
+                    // 寻找空白单元格位置
+                    int emptyIndex = findEmptyCell(targetPage);
+                    if (emptyIndex >= 0) {
+                        // 将原单元格移至空白位置
+                        targetPage.set(emptyIndex, originalCell);
+                    } else {
+                        // 无空白单元格，添加到下一页
+                        handleCellOverflow(originalCell, targetPageIndex);
+                    }
                 }
             }
             
@@ -1116,8 +1369,8 @@ public class WorkspaceFragment extends Fragment {
                     
                     // 页面微震动动画
                     targetPageView.animate()
-                        .scaleX(0.98f)
-                        .scaleY(0.98f)
+                        .scaleX(1.0f)
+                        .scaleY(1.0f)
                         .setDuration(120)
                         .withEndAction(() -> {
                             targetPageView.animate()
@@ -1189,7 +1442,9 @@ public class WorkspaceFragment extends Fragment {
     }
 
     /**
-     * 查找页面中的空白单元格
+     * 查找页面中的空白单元格位置
+     * @param page 目标页面
+     * @return 找到的空白单元格索引，如果没有找到返回-1
      */
     private int findEmptyCell(List<CellLayout.Cell> page) {
         if (page == null) return -1;
@@ -1235,6 +1490,149 @@ public class WorkspaceFragment extends Fragment {
                 hideSystemUI();
             }
             return false; // 不消费事件，让其继续传递
+        });
+    }
+
+    /**
+     * 检查指定页面是否为空（只包含空白单元格）
+     * @param pageIndex 页面索引
+     * @return 如果页面为空返回true
+     */
+    private boolean isPageEmpty(int pageIndex) {
+        if (pageIndex < 0 || pageIndex >= workspaceCells.size()) {
+            return false;
+        }
+        
+        List<CellLayout.Cell> page = workspaceCells.get(pageIndex);
+        for (CellLayout.Cell cell : page) {
+            if (cell != null && !cell.getTag().equals("empty")) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * 移除指定的页面
+     * @param pageIndex 要移除的页面索引
+     */
+    private void removePage(int pageIndex) {
+        if (pageIndex < 0 || pageIndex >= workspaceCells.size()) {
+            return;
+        }
+        
+        // 记录当前页面
+        int currentPage = workspacePager.getCurrentItem();
+        
+        // 移除页面
+        workspaceCells.remove(pageIndex);
+        
+        // 更新页面指示器
+        initPageIndicator();
+        
+        // 通知适配器更新
+        if (workspacePager.getAdapter() != null) {
+            workspacePager.getAdapter().notifyDataSetChanged();
+        }
+        
+        // 如果当前页面被删除或索引变化，更新当前页面
+        if (currentPage >= pageIndex) {
+            int newCurrentPage = Math.max(0, Math.min(currentPage - 1, workspaceCells.size() - 1));
+            workspacePager.setCurrentItem(newCurrentPage, false);
+        }
+        
+        // 保存应用位置
+        saveAppPositions();
+        
+        // 显示提示
+        Toast.makeText(requireContext(), "已删除空白页面", Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * 设置工作区页面的手势导航
+     */
+    private void setupWorkspaceGestures(View rootView) {
+        // 获取全局ViewPager2
+        ViewPager2 mainViewPager = requireActivity().findViewById(R.id.viewPager);
+        
+        // 监听工作区ViewPager的滑动
+        workspacePager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+            private float initialDragX = 0;
+            private boolean isRightSwipeDetected = false;
+            
+            @Override
+            public void onPageScrollStateChanged(int state) {
+                if (state == ViewPager2.SCROLL_STATE_IDLE && isRightSwipeDetected) {
+                    // 重置右滑检测标志
+                    isRightSwipeDetected = false;
+                    
+                    if (workspacePager.getCurrentItem() == 0) {
+                        // 如果已经在第一页并检测到右滑，切换到HomeFragment
+                        Log.d(TAG, "检测到右滑手势，从WorkspaceFragment返回到HomeFragment");
+                        mainViewPager.setCurrentItem(0, true);
+                    }
+                }
+            }
+            
+            @Override
+            public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
+                // 检测是否是右滑手势（从第一页右滑）
+                if (position == 0 && positionOffset == 0 && positionOffsetPixels == 0) {
+                    // 可能是右滑尝试
+                    isRightSwipeDetected = true;
+                }
+            }
+        });
+        
+        // 添加触摸监听器以捕获更精细的手势
+        workspacePager.setOnTouchListener(new View.OnTouchListener() {
+            private float startX;
+            private static final float SWIPE_THRESHOLD = 100;
+            private boolean isProcessingRightSwipe = false;
+            
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startX = event.getX();
+                        isProcessingRightSwipe = false;
+                        break;
+                        
+                    case MotionEvent.ACTION_MOVE:
+                        float currentX = event.getX();
+                        float deltaX = currentX - startX;
+                        
+                        // 检测右滑手势
+                        if (!isProcessingRightSwipe && deltaX > SWIPE_THRESHOLD && workspacePager.getCurrentItem() == 0) {
+                            // 如果在第一页右滑且移动距离超过阈值，标记为正在处理右滑
+                            isProcessingRightSwipe = true;
+                            Log.d(TAG, "检测到右滑手势，准备返回HomeFragment");
+                        }
+                        break;
+                        
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        float endX = event.getX();
+                        float finalDeltaX = endX - startX;
+                        
+                        // 检测右滑手势
+                        if (isProcessingRightSwipe || (finalDeltaX > SWIPE_THRESHOLD && workspacePager.getCurrentItem() == 0)) {
+                            // 如果在第一页右滑，返回到HomeFragment
+                            Log.d(TAG, "执行右滑返回到HomeFragment");
+                            ViewPager2 mainViewPager = requireActivity().findViewById(R.id.viewPager);
+                            if (mainViewPager != null) {
+                                mainViewPager.setCurrentItem(0, true);
+                                return true; // 消费事件
+                            }
+                        }
+                        
+                        isProcessingRightSwipe = false;
+                        break;
+                }
+                
+                return false; // 不消费事件，允许正常滚动
+            }
         });
     }
 }

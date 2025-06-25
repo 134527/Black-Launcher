@@ -57,12 +57,13 @@ public class ScreensaverAdapter extends RecyclerView.Adapter<ScreensaverAdapter.
         
         holder.nameTextView.setText(name);
         holder.iconImageView.setImageDrawable(icon);
-        
+
         // 设置选中状态
         // 设置选中状态
         holder.cardView.setSelected(position == selectedPosition);
 
 // 兼容不同版本的颜色获取方法
+
         int selectedColor, defaultColor;
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
             // 对于 Android 6.0 及以上版本

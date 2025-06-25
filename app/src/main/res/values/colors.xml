@@ -4,4 +4,6 @@
     <color name="white">#FFFFFFFF</color>
     <color name="selected_card">#FF3366CC</color>
     <color name="default_card">#FF333333</color>
+    <color name="shortcuts" >#121419</color>
+    <color name="eeee">#D1CDCD</color>
 </resources>

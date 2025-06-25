@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 用于保存预览动画中图标原始位置的标签ID -->
+    <item name="preview_original_position" type="id" />
+    <item name="tag_selected_wallpaper" type="id" />
+</resources> 

@@ -51,6 +51,16 @@
             android:name=".activities.ScreensaverActivity"
             android:exported="false"
             android:theme="@style/Theme.AppCompat.NoActionBar" />
+        <!-- 壁纸选择器活动 -->
+        <activity
+            android:name=".activities.WallpaperChooserActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AppCompat.NoActionBar" />
+        <!-- 壁纸预览活动 -->
+        <activity
+            android:name=".activities.WallpaperPreviewActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AppCompat.NoActionBar" />
     </application>
 
 </manifest>

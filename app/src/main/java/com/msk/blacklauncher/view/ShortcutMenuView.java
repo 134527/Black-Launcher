@@ -254,6 +254,72 @@ public class ShortcutMenuView {
     }
     
     /**
+     * 卸载应用的公共方法，抽取共用逻辑
+     */
+    private void uninstallApp() {
+        try {
+            Log.d(TAG, "开始卸载应用: " + packageName);
+            
+            // 使用原始上下文，因为它更可能是Activity
+            Intent intent = new Intent(Intent.ACTION_DELETE);
+            intent.setData(Uri.parse("package:" + packageName));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            
+            // 尝试解析Intent
+            PackageManager pm = context.getPackageManager();
+            boolean canHandle = false;
+            try {
+                canHandle = intent.resolveActivity(pm) != null;
+            } catch (Exception e) {
+                Log.e(TAG, "解析卸载Intent失败", e);
+            }
+            
+            if (canHandle) {
+                // 直接使用原始上下文启动卸载
+                context.startActivity(intent);
+                Log.d(TAG, "卸载请求已发送: " + packageName);
+            } else {
+                // 尝试备用卸载Intent
+                Log.d(TAG, "标准卸载Intent无法处理，尝试备用Intent");
+                Intent uninstallIntent = new Intent(Intent.ACTION_UNINSTALL_PACKAGE);
+                uninstallIntent.setData(Uri.parse("package:" + packageName));
+                uninstallIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                
+                try {
+                    context.startActivity(uninstallIntent);
+                    Log.d(TAG, "备用卸载请求已发送: " + packageName);
+                } catch (Exception e) {
+                    Log.e(TAG, "备用卸载Intent启动失败", e);
+                    // 最后尝试跳转到应用详情页
+                    openAppDetails();
+                }
+            }
+            
+            // 关闭菜单
+            dismiss();
+        } catch (Exception e) {
+            Log.e(TAG, "卸载应用失败: " + e.getMessage());
+            openAppDetails();
+        }
+    }
+    
+    /**
+     * 打开应用详情页面
+     */
+    private void openAppDetails() {
+        try {
+            Log.d(TAG, "尝试打开应用详情页: " + packageName);
+            Intent settingsIntent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            settingsIntent.setData(Uri.parse("package:" + packageName));
+            settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(settingsIntent);
+            dismiss();
+        } catch (Exception ex) {
+            Log.e(TAG, "打开应用详情失败: " + ex.getMessage());
+        }
+    }
+
+    /**
      * 设置标准布局按钮的点击事件
      */
     private void setupStandardButtons(LinearLayout shareButton, LinearLayout appInfoButton, LinearLayout uninstallButton) {
@@ -271,27 +337,17 @@ public class ShortcutMenuView {
         
         // 应用信息按钮
         appInfoButton.setOnClickListener(v -> {
-            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    Uri.parse("package:" + packageName));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
-            dismiss();
+            openAppDetails();
         });
         
         // 卸载按钮 - 系统应用不显示
         if (isSystemApp) {
             uninstallButton.setVisibility(View.GONE);
-        } else {
-            uninstallButton.setOnClickListener(v -> {
-
-                Intent intent = new Intent(Intent.ACTION_DELETE,
-                        Uri.parse("package:" + packageName));
-
-                /*intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);*/
-                context.startActivity(intent);
-                dismiss();
-            });
         }
+            uninstallButton.setOnClickListener(v -> {
+                uninstallApp();
+            });
+
     }
     
     /**
@@ -309,28 +365,20 @@ public class ShortcutMenuView {
             context.startActivity(Intent.createChooser(sendIntent, "分享应用"));
             dismiss();
         });
-        
+
         // 应用信息按钮行
         appInfoRow.setOnClickListener(v -> {
-            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    Uri.parse("package:" + packageName));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
-            dismiss();
+            openAppDetails();
         });
         
         // 卸载按钮行 - 系统应用不显示
         if (isSystemApp) {
             uninstallRow.setVisibility(View.GONE);
-        } else {
-            uninstallRow.setOnClickListener(v -> {
-                Intent intent = new Intent(Intent.ACTION_DELETE,
-                        Uri.parse("package:" + packageName));
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                context.startActivity(intent);
-                dismiss();
-            });
         }
+            uninstallRow.setOnClickListener(v -> {
+                uninstallApp();
+            });
+
     }
 
     private void updatePointerPosition(View anchor, int popupX, int popupY) {
@@ -553,7 +601,7 @@ public class ShortcutMenuView {
             
             // 强制更新UI可见性
             decorView.setSystemUiVisibility(uiOptions);
-            
+
             // 记录日志
             Log.d(TAG, "确保全屏模式 - 设置系统UI可见性标志");
         }

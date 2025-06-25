@@ -32,6 +32,11 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
     private boolean isDragging = false;
     private ViewPager2 parentViewPager;
     
+    private boolean isScrolling = false;
+    private long lastScrollTime = 0;
+    private static final long SCROLL_THROTTLE_MS = 500; // 500 milliseconds
+    private static final long SCROLL_DELAY_MS = 500; // 500 milliseconds
+    
     public WorkspaceAdapter(CellLayout.OnCellOverflowListener listener) {
         this.cellOverflowListener = listener;
         Log.d(TAG, "WorkspaceAdapter已创建，确保指示器默认为GONE");
@@ -99,13 +104,10 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
             switch (event.getAction()) {
                 case DragEvent.ACTION_DRAG_STARTED:
                     isDragging = true;
-                    // 确保对应位置的指示器可见
-                    if (position > 0) {
-                        leftIndicator.setVisibility(View.VISIBLE);
-                        leftIndicator.setAlpha(0.5f);
-                    } else {
-                        leftIndicator.setVisibility(View.GONE);
-                    }
+                    // 确保左侧指示器始终不可见，防止白条出现
+                    leftIndicator.setVisibility(View.GONE);
+                    
+                    // 只显示右侧指示器，当有下一页时
                     if (position < getItemCount() - 1) {
                         rightIndicator.setVisibility(View.VISIBLE);
                         rightIndicator.setAlpha(0.5f);
@@ -119,6 +121,18 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
                     
                     // 播放页面进入动画
                     playPageEnterAnimation(holder.itemView);
+                    
+                    // 确保CellLayout能接收拖拽
+                    CellLayout cellLayout = holder.itemView.findViewById(R.id.workspace_grid);
+                    if (cellLayout != null) {
+                        // 确保CellLayout有正确的监听器
+                        cellLayout.setOnDragListener(cellLayout);
+                        
+                        // 如果是跨页面拖拽，确保单元格布局已经准备好
+                        if (cellOverflowListener != null) {
+                            cellOverflowListener.setupWorkspacePage(position);
+                        }
+                    }
                     
                     return true;
                 
@@ -145,6 +159,13 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
                     leftIndicator.setVisibility(View.GONE);
                     rightIndicator.setVisibility(View.GONE);
                     isDragging = false;
+                    
+                    // 记录日志以便追踪问题
+                    boolean success = event.getResult();
+                    Log.d(TAG, "拖拽结果: " + (success ? "成功" : "失败") + 
+                          ", 将第一页的图标拖动到页面边缘时切存在第二页" + 
+                          (position > 0 ? "成功拖动到第" + (position + 1) + "页" : "无法拖动到第二页"));
+                    
                     return true;
             }
             return false;
@@ -165,40 +186,53 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
         // 定义边缘区域大小（百分比）
         float edgeThreshold = 0.15f;  
         
-        // 检测是否在左侧或右侧边缘
-        boolean isLeftEdge = positionPercent < edgeThreshold && position > 0;
+        // 只检测右侧边缘，左侧边缘逻辑已禁用
         boolean isRightEdge = positionPercent > (1 - edgeThreshold) && position < getItemCount() - 1;
         
         // 获取边缘指示器
         View leftIndicator = itemView.findViewById(R.id.drag_indicator_left);
         View rightIndicator = itemView.findViewById(R.id.drag_indicator_right);
         
-        // 更新指示器状态
-        if (isLeftEdge) {
-            // 增强左侧指示器
-            leftIndicator.setBackgroundColor(Color.argb(100, 100, 180, 255));
-            leftIndicator.animate().alpha(0.9f).scaleX(1.2f).setDuration(100).start();
-            
-            // 检查当前是否已经在动画切换中
-            if (parentViewPager.getCurrentItem() == position) {
-                // 切换到上一页，使用平滑动画
-                parentViewPager.setCurrentItem(position - 1, true);
-            }
-        } else if (leftIndicator.getVisibility() == View.VISIBLE) {
-            // 重置左侧指示器
-            leftIndicator.setBackgroundColor(Color.argb(50, 255, 255, 255));
-            leftIndicator.animate().alpha(0.5f).scaleX(1.0f).setDuration(100).start();
+        // 确保左侧指示器始终不可见
+        leftIndicator.setVisibility(View.GONE);
+        
+        // 新增：记录切换时间
+        long currentTime = System.currentTimeMillis();
+        
+        // 右侧指示器只在有下一页时显示
+        if (position < getItemCount() - 1) {
+            rightIndicator.setVisibility(View.VISIBLE);
+        } else {
+            rightIndicator.setVisibility(View.GONE);
         }
         
+        // 静态变量控制页面切换状态
+        if (isScrolling && currentTime - lastScrollTime < SCROLL_THROTTLE_MS) {
+            return; // 如果正在滚动中且未超过阈值时间，则不触发
+        }
+        
+        // 只更新右侧指示器状态
         if (isRightEdge) {
             // 增强右侧指示器
             rightIndicator.setBackgroundColor(Color.argb(100, 100, 180, 255));
             rightIndicator.animate().alpha(0.9f).scaleX(1.2f).setDuration(100).start();
             
             // 检查当前是否已经在动画切换中
-            if (parentViewPager.getCurrentItem() == position) {
+            if (parentViewPager.getCurrentItem() == position && !isScrolling) {
+                // 设置滚动状态和时间
+                isScrolling = true;
+                lastScrollTime = currentTime;
+                
                 // 切换到下一页，使用平滑动画
                 parentViewPager.setCurrentItem(position + 1, true);
+                
+                // 记录日志
+                Log.d(TAG, "拖拽到右侧边缘，切换到页面: " + (position + 1));
+                
+                // 延迟恢复滚动状态，防止连续快速切换
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    isScrolling = false;
+                }, SCROLL_DELAY_MS);
             }
         } else if (rightIndicator.getVisibility() == View.VISIBLE) {
             // 重置右侧指示器
@@ -211,17 +245,15 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
      * 播放页面进入动画
      */
     private void playPageEnterAnimation(View pageView) {
-        // 设置初始缩放
-        pageView.setScaleX(0.95f);
-        pageView.setScaleY(0.95f);
+        // 设置初始状态，不缩放
+        pageView.setScaleX(1.0f);
+        pageView.setScaleY(1.0f);
         pageView.setAlpha(0.9f);
         
-        // 创建属性动画
-        PropertyValuesHolder scaleX = PropertyValuesHolder.ofFloat(View.SCALE_X, 0.95f, 1.0f);
-        PropertyValuesHolder scaleY = PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.95f, 1.0f);
+        // 只创建透明度动画，保持大小不变
         PropertyValuesHolder alpha = PropertyValuesHolder.ofFloat(View.ALPHA, 0.9f, 1.0f);
         
-        ObjectAnimator animator = ObjectAnimator.ofPropertyValuesHolder(pageView, scaleX, scaleY, alpha);
+        ObjectAnimator animator = ObjectAnimator.ofPropertyValuesHolder(pageView, alpha);
         animator.setDuration(200);
         animator.start();
     }

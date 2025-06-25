@@ -16,7 +16,7 @@
         android:id="@+id/drag_indicator_left"
         android:layout_width="40dp"
         android:layout_height="match_parent"
-        android:layout_alignParentStart="true"
+        android:layout_gravity="start"
         android:background="#33FFFFFF"
         android:visibility="gone" />
         
@@ -24,8 +24,21 @@
         android:id="@+id/drag_indicator_right"
         android:layout_width="40dp"
         android:layout_height="match_parent"
-        android:layout_alignParentEnd="true"
+        android:layout_gravity="end"
         android:background="#33FFFFFF"
         android:visibility="gone" />
+    
+    <!-- 新页面创建指示器箭头 -->
+    <ImageView
+        android:id="@+id/new_page_arrow"
+        android:layout_width="24dp"
+        android:layout_height="48dp"
+        android:layout_gravity="center_vertical|end"
+        android:layout_marginEnd="8dp"
+        android:src="@android:drawable/ic_media_next"
+        android:tint="#FFFFFF"
+        android:alpha="0"
+        android:visibility="gone"
+        android:contentDescription="新页面创建指示" />
 
 </FrameLayout>

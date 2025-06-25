@@ -1,6 +1,7 @@
 package com.msk.blacklauncher.view;
 
 
+import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.Context;
@@ -36,10 +37,27 @@ import android.os.Build;
 import android.graphics.drawable.Drawable;
 import android.content.pm.PackageManager;
 import android.widget.Toast;
+import android.view.HapticFeedbackConstants;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.view.animation.AlphaAnimation;
+import android.view.animation.Animation;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.Space;
+import android.widget.TextView;
+import android.view.Gravity;
+import android.view.animation.AccelerateDecelerateInterpolator;
+import android.view.animation.TranslateAnimation;
+import android.os.Handler;
+import android.os.Looper;
+import androidx.recyclerview.widget.RecyclerView;
 
 import com.msk.blacklauncher.R;
 import com.msk.blacklauncher.view.ShortcutMenuView;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -65,6 +83,10 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
     private boolean isDragging = false;
     private long lastDragEventTime = 0;
     private static final long DRAG_FEEDBACK_INTERVAL = 200; // ms
+    
+    // 添加拖拽到边缘时创建页面的节流控制
+    private static final long EDGE_PAGE_CREATION_THROTTLE = 1500; // ms
+    private long lastEdgePageCreationAttemptTime = 0;
     
     // 悬停预览相关变量
     private int lastHoverColumn = -1;
@@ -269,6 +291,12 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
 
     private void initCell(Cell cell) {
         View child = cell.getContentView();
+        
+        // 检查视图是否为null
+        if (child == null) {
+            // 如果内容视图为空，不进行处理
+            return;
+        }
 
         // 检查视图是否已有父视图
         ViewParent parent = child.getParent();
@@ -442,7 +470,6 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     highLightColumn = -1;
                     highLightRow = -1;
                     highlightAlpha = 0f;
-                    targetHighlightAlpha = 0f;
                     highLightValid = false; // 禁用高亮
                     lastHighlightUpdateTime = System.currentTimeMillis();
                     
@@ -492,11 +519,32 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     highLightValid = false;
                     
                     // 如果位置发生变化，重置悬停计时器
-                    if (highlightCol != lastHoverColumn || highlightRow != lastHoverRow) {
-                        // 取消之前的预览效果
+                    boolean positionChanged = highlightCol != lastHoverColumn || highlightRow != lastHoverRow;
+                    if (positionChanged) {
+                        // 取消之前的预览效果，确保图标恢复可见
                         if (isPreviewActive) {
+                            // 保存是否需要恢复图标可见性
+                            final boolean needRestoreVisibility = isPreviewActive;
+                            // 取消预览动画
                             cancelPreviewAnimations();
                             isPreviewActive = false;
+                            
+                            // 确保取消预览后图标恢复可见状态
+                            if (needRestoreVisibility && cells != null) {
+                                for (Cell cell : cells) {
+                                    if (cell != null && cell.getContentView() != null && 
+                                        !cell.getTag().equals("empty")) {
+                                        
+                                        View iconView = cell.getContentView();
+                                        iconView.setVisibility(View.VISIBLE);
+                                        iconView.setAlpha(1.0f);
+                                        iconView.setScaleX(1.0f);
+                                        iconView.setScaleY(1.0f);
+                                        iconView.setTranslationX(0);
+                                        iconView.setTranslationY(0);
+                                    }
+                                }
+                            }
                         }
                         
                         // 关闭所有ShortcutMenuView活跃菜单
@@ -522,15 +570,187 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     }
                     
                     // 检测是否靠近屏幕边缘 - 优化的边缘检测逻辑
-                    int edgeSize = (int)(Math.min(per_cell_width, per_cell_height) * 1.2f); // 增大边缘区域大小
+                    int edgeSize = (int)(Math.min(per_cell_width, per_cell_height) * 0.8f); // 减小边缘区域大小，提高灵敏度
                     boolean isNearLeftEdge = x < edgeSize;
                     boolean isNearRightEdge = x > getWidth() - edgeSize;
+                    
+                    // 获取当前时间，用于节流控制
+                    long currentTime = System.currentTimeMillis();
+                    
+                    // 检测是否靠近屏幕右边缘 - 改进边缘创建页面逻辑
+                    if (isNearRightEdge && cellOverflowListener != null) {
+                        // 根据拖动位置在边缘区域的深入程度计算创建页面的紧急度
+                        float edgeProgress = (x - (getWidth() - edgeSize)) / edgeSize; // 值从0到1
+                        edgeProgress = Math.min(1.0f, Math.max(0.0f, edgeProgress));
+                        
+                        // 根据紧急度动态调整节流时间，越靠近边缘越快响应
+                        long throttleTime = (long)(EDGE_PAGE_CREATION_THROTTLE * (1.0f - edgeProgress * 0.7f));
+                        
+                        // 降低节流时间，使响应更快
+                        throttleTime = Math.min(throttleTime, 800); // 最大节流时间为800ms
+                        
+                        // 判断是否可以尝试创建新页面（根据紧急度动态节流控制）
+                        boolean canCreatePage = (currentTime - lastEdgePageCreationAttemptTime) > throttleTime;
+                        
+                        // 更新右侧指示器的视觉反馈，根据紧急度调整透明度和大小
+                        updateEdgeIndicatorFeedback(v, edgeProgress);
+                        
+                        if (canCreatePage) {
+                            // 更新尝试创建页面的时间
+                            lastEdgePageCreationAttemptTime = currentTime;
+                            
+                            // 获取当前页面
+                            ViewParent parent = getParent();
+                            int currentPage = -1;
+                            ViewPager2 viewPager = null;
+                            
+                            while (parent != null && !(parent.getParent() instanceof ViewPager2)) {
+                                parent = parent.getParent();
+                            }
+                            
+                            if (parent != null) {
+                                ViewGroup viewPagerContent = (ViewGroup) parent;
+                                viewPager = (ViewPager2) viewPagerContent.getParent();
+                                currentPage = viewPager.getCurrentItem();
+                            
+                            int pageCount = cellOverflowListener.getPageCount();
+                            
+                                // 检查是否允许创建新页面或者已经存在下一页
+                                if (cellOverflowListener.canCreateNewPage() || (currentPage < pageCount - 1)) {
+                                    // 获取当前拖拽的单元格
+                                    localState = event.getLocalState();
+                                    
+                                    // 震动反馈 - 根据不同Android版本使用不同方式
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        // 使用新API提供更精确的触感反馈
+                                        try {
+                                            VibrationEffect effect = VibrationEffect.createOneShot(
+                                                    40, // 短暂振动40毫秒
+                                                    VibrationEffect.DEFAULT_AMPLITUDE
+                                            );
+                                            Vibrator vibrator = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+                                            if (vibrator != null) {
+                                                vibrator.vibrate(effect);
+                                            }
+                                        } catch (Exception e) {
+                                            Log.e(TAG, "震动反馈错误", e);
+                                            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                                        }
+                                    } else {
+                                        // 旧版本使用标准触感反馈
+                                        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                                    }
+                                    
+                                    // 显示创建页面的动画提示
+                                    showPageCreationFeedback();
+                                    
+                                    int targetPageIndex;
+                                    
+                                    // 判断是创建新页面还是使用已存在的下一页
+                                    if (currentPage < pageCount - 1) {
+                                        // 如果不是最后一页，直接使用下一页
+                                        targetPageIndex = currentPage + 1;
+                                        Log.d(TAG, "检测到已存在下一页，准备移动到页面 " + targetPageIndex);
+                                    } else {
+                                        // 如果是最后一页，创建新页面
+                                        targetPageIndex = cellOverflowListener.createNewPage();
+                                        Log.d(TAG, "创建新页面，索引为 " + targetPageIndex);
+                                    }
+                                    
+                                    if (localState instanceof Cell) {
+                                        // 为当前拖拽的单元格添加跨页标记
+                                        Cell dragCell = (Cell) localState;
+                                        String packageName = dragCell.getTag();
+                                        
+                                        // 标记为跨页面拖拽，并记录源页面
+                                        if (packageName != null && !packageName.contains(":cross_page")) {
+                                            dragCell.setTag(packageName + ":cross_page:" + currentPage);
+                                            Log.d(TAG, "标记跨页面拖拽: " + dragCell.getTag());
+                                            
+                                            // 如果当前拖动的视图为隐藏状态，确保它在目标页面可见
+                                            if (dragCell.getContentView() != null) {
+                                                dragCell.getContentView().setVisibility(View.VISIBLE);
+                                                dragCell.getContentView().setAlpha(1.0f);
+                                            }
+                                            
+                                            // 保存原始页面，便于拖放失败时返回
+                                            dragCell.setExpectColumnIndex(0); // 保存当前页面索引到列索引
+                                            dragCell.setExpectRowIndex(currentPage); // 保存当前页面索引到行索引
+                                        }
+                                    }
+                                    
+                                    // 平滑滚动到目标页面
+                                    if (viewPager != null) {
+                                        // 使用更平滑的动画过渡到目标页面
+                                        viewPager.setCurrentItem(targetPageIndex, true);
+                                        
+                                        // 提供拖拽反馈
+                                        if (localState instanceof Cell) {
+                                            // 确保用户可以通过返回按钮返回到原始页面
+                                            View rootView = viewPager.getRootView();
+                                            if (rootView.getContext() instanceof Activity) {
+                                                Activity activity = (Activity) rootView.getContext();
+                                                try {
+                                                    // 显示临时提示，告知用户可以返回
+                                                    Toast.makeText(activity, 
+                                                        "您可以点击返回按钮回到原页面", 
+                                                        Toast.LENGTH_SHORT).show();
+                                                } catch (Exception e) {
+                                                    Log.e(TAG, "显示返回提示失败", e);
+                                                }
+                                            }
+                                        }
+                                        
+                                        // 通知WorkspaceFragment确保目标页面已设置
+                                        if (cellOverflowListener != null) {
+                                            // 延迟一小段时间确保页面已创建
+                                            ViewPager2 finalViewPager = viewPager;
+                                            int finalTargetPageIndex = targetPageIndex;
+                                            int finalCurrentPage = currentPage;
+                                            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                                // 设置目标页面
+                                                cellOverflowListener.setupWorkspacePage(finalTargetPageIndex);
+                                                
+                                                // 确保其他应用图标可以拖到目标页面中
+                                                View targetPageView = getViewForPage(finalViewPager, finalTargetPageIndex);
+                                                if (targetPageView != null) {
+                                                    CellLayout targetPageCellLayout = targetPageView.findViewById(R.id.workspace_grid);
+                                                    if (targetPageCellLayout != null) {
+                                                        // 确保目标页面的CellLayout也具有相同的监听器和配置
+                                                        targetPageCellLayout.setOnCellOverflowListener(cellOverflowListener);
+                                                        targetPageCellLayout.setOnDragListener(targetPageCellLayout);
+                                                        targetPageCellLayout.setRows(rows);
+                                                        targetPageCellLayout.setColumns(columns);
+                                                        
+                                                        // 如果是新创建的页面，需要填充空白单元格
+                                                        if (finalCurrentPage == pageCount - 1) {
+                                                            // 填充空白单元格
+                                                            targetPageCellLayout.fillEmptyCells();
+                                                            
+                                                            // 重新加载单元格
+                                                            List<CellLayout.Cell> pageCells = cellOverflowListener.getPageCells(finalTargetPageIndex);
+                                                            if (pageCells != null) {
+                                                                for (Cell cell : pageCells) {
+                                                                    targetPageCellLayout.addCell(cell);
+                                                                }
+                                                            }
+                                                        }
+                                                        
+                                                        Log.d(TAG, "已为目标页面设置CellOverflowListener和拖拽监听器，确保拖拽功能正常");
+                                                    }
+                                                }
+                                            }, 200); // 增加延迟时间确保页面完全创建
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     
                     // 更新边缘指示器可见性
                     updateDragIndicators(v, isNearLeftEdge, isNearRightEdge);
                     
                     // 检查时间间隔，避免频繁触发
-                    long currentTime = System.currentTimeMillis();
                     if (currentTime - lastDragEventTime > DRAG_FEEDBACK_INTERVAL) {
                         lastDragEventTime = currentTime;
                         
@@ -547,8 +767,6 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                             
                             // 关闭所有ShortcutMenuView活跃菜单
                             ShortcutMenuView.dismissActiveMenus();
-                            
-                            // 边缘滚动逻辑...（保持原有实现）
                         }
                     }
                     
@@ -587,10 +805,6 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     // 隐藏拖拽指示器
                     hideDragIndicators(v);
                     
-                    // 获取放置的位置
-                    float dropX = event.getX();
-                    float dropY = event.getY();
-                    
                     // 获取拖动中的数据对象（单元格）
                      localState = event.getLocalState();
                     Cell dragCell = null;
@@ -619,22 +833,13 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                         }
                     }
                     
-                    // 在拖拽结束时恢复视图可见性，并添加放置动画
+                    // 在拖拽结束时恢复视图可见性，不使用动画
                     if (dragCell != null && dragCell.getContentView() != null) {
                         View contentView = dragCell.getContentView();
                         contentView.setVisibility(View.VISIBLE);
-                        contentView.setAlpha(0.7f);
-                        contentView.setScaleX(1.1f);
-                        contentView.setScaleY(1.1f);
-                        
-                        // 应用放置动画 - 使用OvershootInterpolator实现弹性效果
-                        contentView.animate()
-                            .alpha(1.0f)
-                            .scaleX(1.0f)
-                            .scaleY(1.0f)
-                            .setInterpolator(new OvershootInterpolator(0.8f))
-                            .setDuration(250)
-                            .start();
+                        contentView.setAlpha(1.0f);
+                        contentView.setScaleX(1.0f);
+                        contentView.setScaleY(1.0f);
                     }
                     
                     // 找到拖动的单元格在当前页面中的索引
@@ -642,7 +847,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     if (dragCellIndex < 0) {
                         for (int i = 0; i < cells.size(); i++) {
                             Cell cell = cells.get(i);
-                            if (cell == dragCell || (cell.getTag() != null && dragCell != null && 
+                            if (cell == dragCell || (cell.getTag() != null && dragCell != null &&
                                     cell.getTag().equals(dragCell.getTag()))) {
                                 dragCellIndex = i;
                                 break;
@@ -679,6 +884,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                 // 获取当前页面索引
                                 ViewParent parent = getParent();
                                 int currentPage = -1;
+                                ViewPager2 viewPager = null;
                                 
                                 while (parent != null && !(parent.getParent() instanceof ViewPager2)) {
                                     parent = parent.getParent();
@@ -686,12 +892,41 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                 
                                 if (parent != null) {
                                     ViewGroup viewPagerContent = (ViewGroup) parent;
-                                    ViewPager2 viewPager = (ViewPager2) viewPagerContent.getParent();
+                                    viewPager = (ViewPager2) viewPagerContent.getParent();
                                     currentPage = viewPager.getCurrentItem();
+                                    
+                                    // 添加日志以确认当前页面和源页面
+                                    Log.d(TAG, "跨页面拖拽: 从页面 " + fromPage + " 到页面 " + currentPage + 
+                                          " 位置(" + targetColumn + "," + targetRow + ")");
+                                    
+                                    // 先调用监听器处理跨页面拖拽
+                                    cellOverflowListener.onCellSwapped(dragCell, fromPage, currentPage, targetColumn, targetRow);
+                                    
+                                    // 使用新方法处理跨页面拖拽
+                                    handleCrossPageDrop(dragCell, targetIndex, fromPage, currentPage);
+                                    
+                                    // 检查源页面是否为空，如果是空的且不是第一页，删除源页面
+                                    if (fromPage > 0 && fromPage != currentPage) {
+                                        // 创建final副本以在lambda中使用
+                                        final int finalFromPage = fromPage;
+                                        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                            // 通过接口检查是否需要移除空页面
+                                            if (cellOverflowListener != null) {
+                                                // 检查源页面是否为空
+                                                boolean isSourceEmpty = cellOverflowListener.isPageEmpty(finalFromPage);
+                                                
+                                                if (isSourceEmpty) {
+                                                    Log.d(TAG, "源页面" + finalFromPage + "为空，准备删除...");
+                                                    // 通知WorkspaceFragment删除空页面
+                                                    cellOverflowListener.removePage(finalFromPage);
+                                        } else {
+                                                    // 如果源页面不为空，只需要更新页面
+                                                    cellOverflowListener.setupWorkspacePage(finalFromPage);
+                                                }
+                                            }
+                                        }, 300); // 增加延迟确保UI已稳定
+                                    }
                                 }
-                                
-                                // 调用监听器处理跨页面拖拽
-                                cellOverflowListener.onCellSwapped(dragCell, fromPage, currentPage, targetColumn, targetRow);
                             }
                         }
                         
@@ -701,13 +936,18 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                         }
                     }
                     
-                    // 请求重绘
-                    invalidate();
+                    // 在处理完拖放后，确保所有图标可见
+                    ensureAllIconsVisible();
+                    
                     return true;
 
                 case DragEvent.ACTION_DRAG_ENDED:
                     // 拖动操作结束
                     Log.d(TAG, "拖动结束");
+                    
+                    // 检查是否成功放置
+                    boolean success = event.getResult();
+                    Log.d(TAG, "拖拽结果: " + (success ? "成功" : "失败"));
                     
                     // 重置高亮和拖动状态
                     fadeOutHighlight();
@@ -720,22 +960,84 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                         isPreviewActive = false;
                     }
                     
+                    // 确保所有图标可见
+                    ensureAllIconsVisible();
+                    
                     // 隐藏拖拽指示器
                     hideDragIndicators(v);
+                    
+                    // 检查是否是跨页面拖拽且失败的情况，需要返回到原始页面
+                    if (!success && currentDragCell != null) {
+                        // 获取拖拽的单元格
+                        dragCell = currentDragCell;
+                        String tag = dragCell.getTag();
+                        
+                        // 检查是否是跨页面拖拽
+                        boolean isCrossPageDrag = tag != null && tag.contains(":cross_page");
+                        
+                        if (isCrossPageDrag) {
+                            // 恢复原始标签
+                            dragCell.setTag(tag.substring(0, tag.indexOf(":cross_page")));
+                            
+                            // 获取原始页面索引（之前保存在expectRowIndex中）
+                            int originalPage = dragCell.getExpectRowIndex();
+                            
+                            // 获取ViewPager并返回原始页面
+                            ViewParent parent = getParent();
+                            ViewPager2 viewPager = null;
+                            
+                            while (parent != null && !(parent.getParent() instanceof ViewPager2)) {
+                                parent = parent.getParent();
+                            }
+                            
+                            if (parent != null && originalPage >= 0) {
+                                ViewGroup viewPagerContent = (ViewGroup) parent;
+                                viewPager = (ViewPager2) viewPagerContent.getParent();
+                                
+                                // 返回原始页面
+                                Log.d(TAG, "拖拽失败，返回原始页面: " + originalPage);
+                                viewPager.setCurrentItem(originalPage, true);
+                                
+                                // 确保单元格视图可见
+                                if (dragCell.getContentView() != null) {
+                                    dragCell.getContentView().setVisibility(View.VISIBLE);
+                                }
+                                
+                                // 弹出提示
+                                Context context = viewPager.getContext();
+                                if (context != null) {
+                                    Toast.makeText(context, "拖拽未完成，已返回原始页面", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        }
+                    }
                     
                     // 确保所有临时隐藏的视图恢复可见
                     for (Cell cell : cells) {
                         if (cell.getContentView() != null && !cell.getTag().equals("empty")) {
                             View contentView = cell.getContentView();
+                            if (contentView.getVisibility() != View.VISIBLE) {
                             contentView.setVisibility(View.VISIBLE);
+                            }
                             
                             // 确保视图属性重置，使用动画效果
                             contentView.animate()
                                 .alpha(1.0f)
                                 .scaleX(1.0f)
                                 .scaleY(1.0f)
+                                .translationX(0)
+                                .translationY(0)
                                 .setInterpolator(new DecelerateInterpolator())
                                 .setDuration(150)
+                                .withEndAction(() -> {
+                                    // 确保动画结束后视图状态正确
+                                    contentView.setVisibility(View.VISIBLE);
+                                    contentView.setAlpha(1.0f);
+                                    contentView.setTranslationX(0);
+                                    contentView.setTranslationY(0);
+                                    contentView.setScaleX(1.0f);
+                                    contentView.setScaleY(1.0f);
+                                })
                                 .start();
                         }
                     }
@@ -759,6 +1061,9 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                 cancelPreviewAnimations();
                 isPreviewActive = false;
             }
+            
+            // 确保所有图标可见
+            ensureAllIconsVisible();
             
             // 隐藏拖拽指示器
             hideDragIndicators(v);
@@ -829,154 +1134,167 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
             return;
         }
 
-        // 以下是非空目标单元格的处理逻辑，保持原有实现
+        // 以下是非空目标单元格的处理逻辑，改进为智能排序和填空
         // 创建临时数组保存当前状态
         ArrayList<Cell> tempCells = new ArrayList<>(cells);
-
+        
         // 记录哪些视图需要应用动画
         ArrayList<Integer> cellsToAnimate = new ArrayList<>();
         
-        if (targetIndex > sourceIndex) {
-            // 向后移动: 目标位置比源位置大
-            // 收集需要应用动画的单元格索引
-            for (int i = sourceIndex + 1; i <= targetIndex; i++) {
-                if (!tempCells.get(i).getTag().equals("empty")) {
-                    cellsToAnimate.add(i);
-                }
+        // 创建一个排序后的单元格列表，去除空单元格
+        ArrayList<Cell> sortedCells = new ArrayList<>();
+        for (Cell cell : cells) {
+            if (!cell.getTag().equals("empty")) {
+                sortedCells.add(cell);
             }
-            
-            // 应用位置变更
-            for (int i = sourceIndex; i < targetIndex; i++) {
-                cells.set(i, tempCells.get(i + 1));
+        }
+        
+        // 将源单元格移动到目标位置
+        if (sortedCells.contains(sourceCell)) {
+            sortedCells.remove(sourceCell);
+        }
+        
+        // 计算目标排序位置
+        int targetSortedIndex = 0;
+        for (int i = 0; i < targetIndex; i++) {
+            if (!cells.get(i).getTag().equals("empty")) {
+                targetSortedIndex++;
             }
-            cells.set(targetIndex, sourceCell);
+        }
+        
+        // 在目标位置插入源单元格
+        if (targetSortedIndex <= sortedCells.size()) {
+            sortedCells.add(targetSortedIndex, sourceCell);
         } else {
-            // 向前移动: 目标位置比源位置小
-            // 收集需要应用动画的单元格索引
-            for (int i = targetIndex; i < sourceIndex; i++) {
-                if (!tempCells.get(i).getTag().equals("empty")) {
-                    cellsToAnimate.add(i);
-                }
-            }
+            sortedCells.add(sourceCell);
+        }
+        
+        // 清空当前单元格列表并重新填充
+        for (int i = 0; i < cells.size(); i++) {
+            // 使用安全的方式创建空单元格
+            Cell emptyCell = new Cell("empty", null);
+            // 设置默认尺寸以避免测量问题
+            emptyCell.setWidthNum(1);
+            emptyCell.setHeightNum(1);
+            cells.set(i, emptyCell);
+        }
+        
+        // 重新填充单元格，首先放置非空单元格
+        for (int i = 0; i < sortedCells.size(); i++) {
+            cells.set(i, sortedCells.get(i));
             
-            // 应用位置变更
-            for (int i = sourceIndex; i > targetIndex; i--) {
-                cells.set(i, tempCells.get(i - 1));
+            // 如果这个单元格在移动过程中发生了变化，添加到动画列表
+            if (i != tempCells.indexOf(sortedCells.get(i))) {
+                cellsToAnimate.add(i);
             }
-            cells.set(targetIndex, sourceCell);
         }
         
         // 应用图标滑动动画
         applySlideAnimations(tempCells, cellsToAnimate, sourceIndex, targetIndex);
         
+        // 通知单元格变更
+        if (onCellsChangedListener != null) {
+            onCellsChangedListener.onCellsChanged();
+        }
+        
         // 重新布局
         requestLayout();
     }
     
-    // 增强的图标滑动动画方法
+    /**
+     * 应用图标移动效果（简化版，无动画）
+     */
     private void applySlideAnimations(ArrayList<Cell> originalCells, ArrayList<Integer> cellsToAnimate, 
                                      int sourceIndex, int targetIndex) {
-        // 获取布局尺寸
-        int layoutWidth = getWidth();
-        int layoutHeight = getHeight();
-        
-        // 设置动画基础参数
-        long baseDuration = 280; // 基础动画时长
-        long staggerDelay = 30;  // 每个图标的延迟时间差
-        
+        // 直接设置所有图标的最终位置，不使用动画
         for (int i = 0; i < cellsToAnimate.size(); i++) {
-            Integer originalIndex = cellsToAnimate.get(i);
-            Cell cell = originalCells.get(originalIndex);
+            Integer currentIndex = cellsToAnimate.get(i);
+            Cell cell = cells.get(currentIndex);
             if (cell.getContentView() == null || cell.getTag().equals("empty")) {
                 continue;
             }
             
             View iconView = cell.getContentView();
             
-            // 找出此单元格在新位置的坐标
-            int newIndex;
-            if (targetIndex > sourceIndex) {
-                // 向后移动
-                newIndex = originalIndex - 1;
-            } else {
-                // 向前移动
-                newIndex = originalIndex + 1;
-            }
+            // 取消所有正在进行的动画
+            iconView.clearAnimation();
+            iconView.animate().cancel();
             
-            // 计算原位置和新位置的坐标差
-            int fromColumn = originalIndex % columns;
-            int fromRow = originalIndex / columns;
-            int toColumn = newIndex % columns;
-            int toRow = newIndex / columns;
-            
-            float fromX = fromColumn * per_cell_width;
-            float fromY = fromRow * per_cell_height;
-            float toX = toColumn * per_cell_width;
-            float toY = toRow * per_cell_height;
-            
-            // 设置初始位置的平移
+            // 直接设置最终状态
             iconView.setTranslationX(0);
             iconView.setTranslationY(0);
-            
-            // 计算当前图标的动画延迟（错开动画开始时间）
-            long delay = i * staggerDelay;
-            
-            // 设置硬件加速提高动画性能
-            iconView.setLayerType(LAYER_TYPE_HARDWARE, null);
-            
-            // 如果是横向移动，添加小幅纵向移动做波浪效果
-            float waveOffset = 0;
-            if (fromRow == toRow) {
-                // 横向移动的情况，添加波浪效果
-                waveOffset = 10f; // 波浪振幅，像素
+            iconView.setAlpha(1.0f);
+            iconView.setScaleX(1.0f);
+            iconView.setScaleY(1.0f);
+            iconView.setRotation(0);
+            iconView.setZ(0); // 重置Z轴高度
+            iconView.setLayerType(LAYER_TYPE_NONE, null); // 重置硬件加速
+        }
+    }
+
+    // 修改跨页面拖拽代码
+    private void handleCrossPageDrop(Cell dragCell, int targetIndex, int fromPage, int currentPage) {
+        if (dragCell == null || cellOverflowListener == null) return;
+        
+        try {
+            // 确保视图可见
+            if (dragCell.getContentView() != null) {
+                View contentView = dragCell.getContentView();
+                contentView.setVisibility(View.VISIBLE);
+                contentView.setAlpha(1.0f);
+                
+                // 不使用动画
+                contentView.setScaleX(1.0f);
+                contentView.setScaleY(1.0f);
             }
             
-            // 保存原始Z轴高度
-            float originalZ = iconView.getZ();
-            
-            // 提高Z轴高度，使动画中的图标显示在上层
-            iconView.setZ(originalZ + 10);
-            
-            // 开始移动前先应用压缩效果
-            float finalWaveOffset = waveOffset;
-            iconView.animate()
-                .scaleX(0.85f)
-                .scaleY(0.85f)
-                .setDuration(baseDuration / 3)
-                .setStartDelay(delay)
-                .withEndAction(() -> {
-                    // 主移动动画 - 带波浪效果和弹性
-                    iconView.animate()
-                        .translationX(toX - fromX)
-                        .translationY(toY - fromY + finalWaveOffset)
-                        .scaleX(1.0f)
-                        .scaleY(1.0f)
-                        .setInterpolator(new OvershootInterpolator(0.9f))
-                        .setDuration(baseDuration)
-                        .start();
-                })
-                .start();
-            
-            // 在动画过程中添加轻微旋转，使效果更加自然
-            float rotationAmount = 2.0f; // 旋转角度（度）
-            
-            // 如果是横向移动，根据方向调整旋转角度
-            if (fromRow == toRow) {
-                // 根据移动方向确定旋转方向
-                rotationAmount = (fromColumn > toColumn) ? rotationAmount : -rotationAmount;
+            // 确保原标签已恢复（移除跨页面标记）
+            String tag = dragCell.getTag();
+            if (tag != null && tag.contains(":cross_page")) {
+                dragCell.setTag(tag.substring(0, tag.indexOf(":cross_page")));
             }
             
-            iconView.animate()
-                .rotation(rotationAmount)
-                .setDuration(baseDuration / 2)
-                .setStartDelay(delay + baseDuration / 3)
-                .withEndAction(() -> {
-                    iconView.animate()
-                        .rotation(0)
-                        .setDuration(baseDuration / 2)
-                        .start();
-                })
-                .start();
+            // 如果是空白位置直接放置，否则尝试使用moveCells
+            Cell targetCell = cells.get(targetIndex);
+            if (targetCell.getTag().equals("empty")) {
+                // 确保单元格大小正确
+                dragCell.setWidthNum(1);
+                dragCell.setHeightNum(1);
+                cells.set(targetIndex, dragCell);
+                Log.d(TAG, "成功放置跨页面应用到空白位置: " + targetIndex);
+            } else {
+                // 寻找空位
+                int emptyIndex = -1;
+                for (int i = 0; i < cells.size(); i++) {
+                    if (cells.get(i).getTag().equals("empty")) {
+                        emptyIndex = i;
+                        break;
+                    }
+                }
+                
+                if (emptyIndex >= 0) {
+                    // 先放在空位
+                    dragCell.setWidthNum(1);
+                    dragCell.setHeightNum(1);
+                    cells.set(emptyIndex, dragCell);
+                    
+                    // 然后移动到目标位置
+                    moveCells(emptyIndex, targetIndex);
+                    Log.d(TAG, "已将跨页面应用放置到位置 " + targetIndex);
+                } else {
+                    // 没有空位，添加到末尾
+                    Log.w(TAG, "无法找到空位放置跨页面应用，使用第一个位置");
+                    dragCell.setWidthNum(1);
+                    dragCell.setHeightNum(1);
+                    cells.set(0, dragCell);
+                }
+            }
+            
+            // 请求重新布局
+            requestLayout();
+            invalidate();
+        } catch (Exception e) {
+            Log.e(TAG, "处理跨页面拖拽图标放置失败: " + e.getMessage(), e);
         }
     }
 
@@ -990,20 +1308,12 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
 
         // 如果当前单元格数量少于总单元格数，添加空白单元格
         for (int i = currentSize; i < totalCells; i++) {
-            // 创建空白单元格
-            View emptyView = new View(getContext());
-            emptyView.setBackgroundColor(Color.TRANSPARENT);
-
             // 创建空白单元格并添加
-            Cell emptyCell = new Cell("empty", emptyView);
+            Cell emptyCell = new Cell("empty", null);
+            // 设置默认尺寸以避免测量问题
+            emptyCell.setWidthNum(1);
+            emptyCell.setHeightNum(1);
             cells.add(emptyCell);
-
-            // 添加到布局但设为不可见
-            if (emptyView.getParent() != null) {
-                ((ViewGroup)emptyView.getParent()).removeView(emptyView);
-            }
-            emptyView.setVisibility(View.INVISIBLE);
-            addView(emptyView);
         }
 
         Log.d(TAG, "已填充空白单元格：总计 " + totalCells + " 个单元格");
@@ -1226,6 +1536,46 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
          * @return 页面总数
          */
         int getPageCount();
+        
+        /**
+         * 创建新页面
+         * @return 新页面索引
+         */
+        int createNewPage();
+        
+        /**
+         * 检查是否可以创建新页面
+         * @return true如果允许创建新页面
+         */
+        boolean canCreateNewPage();
+        
+        /**
+         * 当拖拽到页面边缘，请求创建新页面并移动项目到该页面
+         * @param cellToMove 被拖动的单元格
+         * @param fromPageIndex 源页面索引
+         * @return 新页面的索引，如果创建失败则返回-1
+         */
+        int requestNewPageAndMoveItem(Cell cellToMove, int fromPageIndex);
+        
+        /**
+         * 检查指定页面是否为空（只包含空白单元格）
+         * @param pageIndex 页面索引
+         * @return 如果页面为空返回true
+         */
+        boolean isPageEmpty(int pageIndex);
+        
+        /**
+         * 移除指定的页面
+         * @param pageIndex 要移除的页面索引
+         */
+        void removePage(int pageIndex);
+        
+        /**
+         * 获取指定页面的单元格列表
+         * @param pageIndex 页面索引
+         * @return 单元格列表，如果页面不存在则返回null
+         */
+        List<Cell> getPageCells(int pageIndex);
     }
 
     private OnCellOverflowListener cellOverflowListener;
@@ -1242,22 +1592,15 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
             View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
             
             if (leftIndicator != null && rightIndicator != null) {
-                leftIndicator.setVisibility(View.VISIBLE);
+                // 始终隐藏左侧指示器，防止白条出现
+                leftIndicator.setVisibility(View.GONE);
                 rightIndicator.setVisibility(View.VISIBLE);
                 
-                // 应用渐变动画
-                leftIndicator.setAlpha(0f);
+                // 只对右侧指示器应用渐变动画
                 rightIndicator.setAlpha(0f);
                 
                 // 使用硬件加速提高动画性能
-                leftIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
                 rightIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
-                
-                leftIndicator.animate()
-                    .alpha(1f)
-                    .setDuration(200)
-                    .withEndAction(() -> leftIndicator.setLayerType(LAYER_TYPE_NONE, null))
-                    .start();
                 
                 rightIndicator.animate()
                     .alpha(1f)
@@ -1276,32 +1619,10 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
             View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
             
             if (leftIndicator != null && rightIndicator != null) {
-                // 激活靠近的边缘指示器
-                if (isNearLeft) {
-                    leftIndicator.setBackgroundColor(Color.argb(100, 100, 180, 255));
-                    
-                    // 仅当状态改变时应用动画，避免性能浪费
-                    if (leftIndicator.getScaleX() < 1.15f) {
-                        leftIndicator.animate()
-                            .scaleX(1.2f)
-                            .scaleY(1.05f)
-                            .setInterpolator(new OvershootInterpolator(0.5f))
-                            .setDuration(150)
-                            .start();
-                    }
-                } else {
-                    leftIndicator.setBackgroundColor(Color.argb(50, 255, 255, 255));
-                    
-                    // 仅当状态改变时应用动画
-                    if (leftIndicator.getScaleX() > 1.05f) {
-                        leftIndicator.animate()
-                            .scaleX(1.0f)
-                            .scaleY(1.0f)
-                            .setDuration(100)
-                            .start();
-                    }
-                }
+                // 始终隐藏左侧指示器
+                leftIndicator.setVisibility(View.GONE);
                 
+                // 只处理右侧指示器
                 if (isNearRight) {
                     rightIndicator.setBackgroundColor(Color.argb(100, 100, 180, 255));
                     
@@ -1338,42 +1659,31 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
             View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
             
             if (leftIndicator != null && rightIndicator != null) {
-                // 使用硬件加速提高动画性能
-                leftIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
-                rightIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
+                // 确保左侧指示器始终不可见
+                leftIndicator.setVisibility(View.GONE);
                 
-                // 应用渐变动画后隐藏
-                leftIndicator.animate().alpha(0f).setDuration(150)
-                    .withEndAction(() -> {
-                        leftIndicator.setVisibility(View.GONE);
-                        leftIndicator.setLayerType(LAYER_TYPE_NONE, null);
-                    })
-                    .start();
-                
-                rightIndicator.animate().alpha(0f).setDuration(150)
-                    .withEndAction(() -> {
-                        rightIndicator.setVisibility(View.GONE);
-                        rightIndicator.setLayerType(LAYER_TYPE_NONE, null);
-                    })
-                    .start();
+                // 只处理右侧指示器的动画隐藏
+                if (rightIndicator.getVisibility() == View.VISIBLE) {
+                    // 使用硬件加速提高动画性能
+                    rightIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
+                    
+                    // 应用渐变动画后隐藏
+                    rightIndicator.animate().alpha(0f).setDuration(150)
+                        .withEndAction(() -> {
+                            rightIndicator.setVisibility(View.GONE);
+                            rightIndicator.setLayerType(LAYER_TYPE_NONE, null);
+                        })
+                        .start();
+                }
             }
         }
     }
 
     private void playPageEnterAnimation(View pageView) {
-        // 设置初始缩放状态（缩小至95%）
-        pageView.setScaleX(0.95f);
-        pageView.setScaleY(0.95f);
-        pageView.setAlpha(0.9f);
-        
-        // 创建动画，恢复到正常大小
-        PropertyValuesHolder scaleX = PropertyValuesHolder.ofFloat(View.SCALE_X, 0.95f, 1.0f);
-        PropertyValuesHolder scaleY = PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.95f, 1.0f);
-        PropertyValuesHolder alpha = PropertyValuesHolder.ofFloat(View.ALPHA, 0.9f, 1.0f);
-        
-        ObjectAnimator animator = ObjectAnimator.ofPropertyValuesHolder(pageView, scaleX, scaleY, alpha);
-        animator.setDuration(200);
-        animator.start();
+        // 直接设置最终状态，不使用动画
+        pageView.setScaleX(1.0f);
+        pageView.setScaleY(1.0f);
+        pageView.setAlpha(1.0f);
     }
 
     /**
@@ -1473,6 +1783,10 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
             float toX = toColumn * per_cell_width;
             float toY = toRow * per_cell_height;
             
+            // 保存原始位置信息到视图标签中，便于恢复
+            int[] originalPosition = new int[] {fromColumn, fromRow};
+            iconView.setTag(R.id.preview_original_position, originalPosition);
+            
             // 添加延迟效果
             long delay = i * 20;
             
@@ -1487,8 +1801,8 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                 .translationX(toX - fromX)
                 .translationY(toY - fromY)
                 .alpha(previewAlpha)
-                .scaleX(0.9f)
-                .scaleY(0.9f)
+                .scaleX(1.0f)
+                .scaleY(1.0f)
                 .setStartDelay(delay)
                 .setDuration(baseDuration)
                 .setInterpolator(new DecelerateInterpolator())
@@ -1503,15 +1817,20 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         // 循环恢复所有预览中的视图
         for (View view : previewAnimatedViews) {
             if (view != null) {
-                view.animate()
-                    .translationX(0)
-                    .translationY(0)
-                    .alpha(1.0f)
-                    .scaleX(1.0f)
-                    .scaleY(1.0f)
-                    .setDuration(150)
-                    .setInterpolator(new OvershootInterpolator(0.7f))
-                    .start();
+                // 取消所有可能正在进行的动画
+                view.clearAnimation();
+                view.animate().cancel();
+                
+                // 直接设置视图状态，不使用动画
+                view.setVisibility(View.VISIBLE);
+                view.setAlpha(1.0f);
+                view.setScaleX(1.0f);
+                view.setScaleY(1.0f);
+                view.setTranslationX(0);
+                view.setTranslationY(0);
+                
+                // 移除标签
+                view.setTag(R.id.preview_original_position, null);
             }
         }
         
@@ -1658,12 +1977,12 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                 // 增强拖拽时的阴影效果
                 canvas.save();
                 
-                // 应用缩放效果，使阴影略大于原始图标
-                float scale = 0.95f;
-                canvas.scale(scale, scale, canvas.getWidth()/2f, canvas.getHeight()/2f);
+                // 移除缩放效果，保持原始大小
+                // float scale = 0.95f;
+                // canvas.scale(scale, scale, canvas.getWidth()/2f, canvas.getHeight()/2f);
                 
                 // 平移效果，使阴影稍微上移
-                canvas.translate(0, -8);
+                canvas.translate(0, -12);
                 
                 // 绘制原始视图作为阴影
                 super.onDrawShadow(canvas);
@@ -1748,12 +2067,12 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                 // 增强拖拽时的阴影效果
                 canvas.save();
                 
-                // 应用缩放效果，使阴影略大于原始图标
-                float scale = 0.95f;
-                canvas.scale(scale, scale, canvas.getWidth()/2f, canvas.getHeight()/2f);
+                // 移除缩放效果，保持原始大小
+                // float scale = 0.95f;
+                // canvas.scale(scale, scale, canvas.getWidth()/2f, canvas.getHeight()/2f);
                 
                 // 平移效果，使阴影稍微上移
-                canvas.translate(0, -8);
+                canvas.translate(0, -12);
                 
                 // 绘制原始视图作为阴影
                 super.onDrawShadow(canvas);
@@ -1788,6 +2107,337 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         ViewParent parent = getParent();
         if (parent instanceof ViewGroup) {
             showDragIndicators((View) parent);
+        }
+    }
+
+    /**
+     * 判断当前页面是否已满（没有空白单元格）
+     * @return 如果页面已满返回true
+     */
+    private boolean isPageFull() {
+        if (cells == null) return false;
+        
+        for (Cell cell : cells) {
+            // 如果有空白单元格，则页面未满
+            if (cell != null && "empty".equals(cell.getTag())) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    /**
+     * 通知可能需要创建新页面
+     */
+    private void notifyPossiblePageCreation() {
+        // 获取当前拖拽的单元格
+        if (currentDragCell != null && cellOverflowListener != null) {
+            // 获取当前页面索引
+            int currentPage = -1;
+            ViewParent parent = getParent();
+            
+            while (parent != null && !(parent.getParent() instanceof ViewPager2)) {
+                parent = parent.getParent();
+            }
+            
+            if (parent != null) {
+                ViewGroup viewPagerContent = (ViewGroup) parent;
+                ViewPager2 viewPager = (ViewPager2) viewPagerContent.getParent();
+                currentPage = viewPager.getCurrentItem();
+            }
+            
+            if (currentPage != -1) {
+                // 通知需要处理溢出
+                cellOverflowListener.onCellOverflow(currentDragCell, currentPage);
+            }
+        }
+    }
+
+    /**
+     * 显示页面创建的视觉反馈
+     */
+    private void showPageCreationFeedback() {
+        // 尝试获取Activity上下文
+        Context context = getContext();
+        if (context instanceof Activity) {
+            Activity activity = (Activity) context;
+            
+            // 创建一个自定义视图作为页面创建反馈
+            FrameLayout feedbackContainer = new FrameLayout(context);
+            feedbackContainer.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            ));
+            feedbackContainer.setBackgroundResource(android.R.drawable.toast_frame);
+            feedbackContainer.setPadding(24, 16, 24, 16);
+            
+            // 添加文本视图
+            TextView textView = new TextView(context);
+            textView.setText("创建新页面");
+            textView.setTextSize(16);
+            textView.setTextColor(Color.WHITE);
+            
+            // 添加一个简单的图标
+            ImageView iconView = new ImageView(context);
+            iconView.setImageResource(android.R.drawable.ic_menu_add);
+            iconView.setColorFilter(Color.WHITE);
+            
+            // 水平布局容器
+            LinearLayout contentLayout = new LinearLayout(context);
+            contentLayout.setOrientation(LinearLayout.HORIZONTAL);
+            contentLayout.setGravity(Gravity.CENTER_VERTICAL);
+            contentLayout.addView(iconView, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            ));
+            
+            // 添加间距
+            Space space = new Space(context);
+            LinearLayout.LayoutParams spaceParams = new LinearLayout.LayoutParams(12, 0);
+            contentLayout.addView(space, spaceParams);
+            
+            // 添加文本
+            contentLayout.addView(textView, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            ));
+            
+            feedbackContainer.addView(contentLayout);
+            
+            // 添加到Activity的根视图
+            ViewGroup rootView = (ViewGroup) activity.getWindow().getDecorView().findViewById(android.R.id.content);
+            rootView.addView(feedbackContainer);
+            
+            // 设置初始状态
+            feedbackContainer.setAlpha(0f);
+            feedbackContainer.setScaleX(0.8f);
+            feedbackContainer.setScaleY(0.8f);
+            
+            // 计算位置（屏幕右侧中间位置）
+            feedbackContainer.setTranslationX(rootView.getWidth() - feedbackContainer.getWidth() - 32);
+            feedbackContainer.setTranslationY(rootView.getHeight() / 2f - feedbackContainer.getHeight() / 2f);
+            
+            // 应用出现动画
+            feedbackContainer.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(250)
+                    .setInterpolator(new OvershootInterpolator(0.8f))
+                    .withEndAction(() -> {
+                        // 保持显示一段时间后自动消失
+                        feedbackContainer.animate()
+                                .alpha(0f)
+                                .scaleX(0.8f)
+                                .scaleY(0.8f)
+                                .setStartDelay(1200)
+                                .setDuration(200)
+                                .withEndAction(() -> rootView.removeView(feedbackContainer))
+                                .start();
+                    })
+                    .start();
+        } else {
+            // 退回到使用Toast的方式
+            Toast.makeText(context, "创建新页面", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    /**
+     * 更新边缘指示器的视觉反馈
+     * @param view 父视图
+     * @param progress 靠近边缘的进度 (0-1)
+     */
+    private void updateEdgeIndicatorFeedback(View view, float progress) {
+        // 检查视图是否为null
+        if (view == null) {
+            return;
+        }
+        
+        ViewParent viewParent = view.getParent();
+        if (!(viewParent instanceof ViewGroup)) {
+            return;
+        }
+        
+        ViewGroup parent = (ViewGroup) viewParent;
+        
+        // 查找指示器视图
+        View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
+        if (rightIndicator == null) {
+            return;
+        }
+        
+        // 根据进度调整透明度
+        float alpha = 0.3f + progress * 0.7f;
+        rightIndicator.setAlpha(alpha);
+        
+        // 根据进度调整缩放
+        float scale = 1.0f + progress * 0.3f;
+        rightIndicator.setScaleX(scale);
+        
+        // 调整颜色
+        int color = blendColors(
+                Color.argb(50, 255, 255, 255),  // 初始颜色
+                Color.argb(150, 100, 180, 255), // 最终颜色
+                progress
+        );
+        rightIndicator.setBackgroundColor(color);
+        
+        // 添加脉动动画效果
+        if (progress > 0.7f) {
+            // 进度较高时添加脉动动画
+            addPulseAnimation(rightIndicator);
+        } else {
+            // 取消现有动画
+            rightIndicator.clearAnimation();
+        }
+        
+        // 处理新页面箭头指示器
+        ImageView newPageArrow = parent.findViewById(R.id.new_page_arrow);
+        if (newPageArrow != null) {
+            // 仅当足够靠近边缘时显示箭头
+            if (progress > 0.5f) {
+                if (newPageArrow.getVisibility() != View.VISIBLE) {
+                    newPageArrow.setVisibility(View.VISIBLE);
+                    newPageArrow.setAlpha(0f);
+                }
+                
+                // 根据进度调整箭头透明度
+                float arrowAlpha = (progress - 0.5f) * 2f; // 0.5-1.0进度映射到0-1透明度
+                
+                // 仅当透明度变化明显时更新动画
+                if (Math.abs(newPageArrow.getAlpha() - arrowAlpha) > 0.05f) {
+                    // 应用箭头动画
+                    newPageArrow.animate()
+                            .alpha(arrowAlpha)
+                            .translationX(progress > 0.8f ? -5f : 0f) // 靠近边缘时添加小移动
+                            .setDuration(150)
+                            .start();
+                    
+                    // 当进度很高时，添加箭头的水平抖动动画
+                    if (progress > 0.85f && newPageArrow.getAnimation() == null) {
+                        Animation arrowPulse = new TranslateAnimation(
+                                0, -8, 0, 0);
+                        arrowPulse.setDuration(600);
+                        arrowPulse.setRepeatCount(Animation.INFINITE);
+                        arrowPulse.setRepeatMode(Animation.REVERSE);
+                        arrowPulse.setInterpolator(new AccelerateDecelerateInterpolator());
+                        newPageArrow.startAnimation(arrowPulse);
+                    } else if (progress <= 0.85f) {
+                        // 进度不高时，清除动画
+                        newPageArrow.clearAnimation();
+                    }
+                }
+            } else {
+                // 离边缘太远，隐藏箭头
+                if (newPageArrow.getVisibility() == View.VISIBLE) {
+                    newPageArrow.animate()
+                            .alpha(0f)
+                            .setDuration(150)
+                            .withEndAction(() -> newPageArrow.setVisibility(View.GONE))
+                            .start();
+                    
+                    newPageArrow.clearAnimation();
+                }
+            }
+        }
+    }
+    
+    /**
+     * 添加脉动动画
+     */
+    private void addPulseAnimation(View view) {
+        // 检查是否已经有脉动动画
+        if (view.getTag() != null && "pulsing".equals(view.getTag())) {
+            return; // 已经有脉动动画
+        }
+        
+        // 标记视图正在进行脉动动画
+        view.setTag("pulsing");
+        
+        // 创建脉动动画
+        Animation pulse = new AlphaAnimation(1.0f, 0.7f);
+        pulse.setDuration(400);
+        pulse.setRepeatCount(Animation.INFINITE);
+        pulse.setRepeatMode(Animation.REVERSE);
+        
+        // 应用动画
+        view.startAnimation(pulse);
+    }
+    
+    /**
+     * 混合两种颜色
+     */
+    private int blendColors(int color1, int color2, float ratio) {
+        final float inverseRatio = 1f - ratio;
+        
+        float a = (Color.alpha(color1) * inverseRatio) + (Color.alpha(color2) * ratio);
+        float r = (Color.red(color1) * inverseRatio) + (Color.red(color2) * ratio);
+        float g = (Color.green(color1) * inverseRatio) + (Color.green(color2) * ratio);
+        float b = (Color.blue(color1) * inverseRatio) + (Color.blue(color2) * ratio);
+        
+        return Color.argb((int) a, (int) r, (int) g, (int) b);
+    }
+
+    /**
+     * 获取指定页面索引的View
+     */
+    private View getViewForPage(ViewPager2 viewPager, int pageIndex) {
+        if (viewPager == null) return null;
+        
+        try {
+            // 获取ViewPager2内部的RecyclerView
+            Field recyclerViewField = ViewPager2.class.getDeclaredField("mRecyclerView");
+            recyclerViewField.setAccessible(true);
+            RecyclerView recyclerView = (RecyclerView) recyclerViewField.get(viewPager);
+            
+            if (recyclerView != null) {
+                // 尝试查找指定页面的视图
+                for (int i = 0; i < recyclerView.getChildCount(); i++) {
+                    View child = recyclerView.getChildAt(i);
+                    RecyclerView.ViewHolder holder = recyclerView.getChildViewHolder(child);
+                    if (holder != null && holder.getAdapterPosition() == pageIndex) {
+                        return child;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "获取页面视图失败: " + e.getMessage());
+        }
+        
+        return null;
+    }
+
+    /**
+     * 拖动结束时确保所有图标可见
+     */
+    private void ensureAllIconsVisible() {
+        if (cells != null) {
+            for (Cell cell : cells) {
+                if (cell != null && cell.getContentView() != null && 
+                    !cell.getTag().equals("empty")) {
+                    
+                    View iconView = cell.getContentView();
+                    // 取消所有可能正在进行的动画
+                    iconView.clearAnimation();
+                    iconView.animate().cancel();
+                    
+                    // 立即设置图标可见，不使用动画
+                    iconView.setVisibility(View.VISIBLE);
+                    iconView.setAlpha(1.0f);
+                    iconView.setScaleX(1.0f);
+                    iconView.setScaleY(1.0f);
+                    iconView.setTranslationX(0);
+                    iconView.setTranslationY(0);
+                    
+                    // 移除所有临时标签
+                    iconView.setTag(R.id.preview_original_position, null);
+                }
+            }
+            
+            // 请求重新布局和绘制
+            requestLayout();
+            invalidate();
         }
     }
 }

@@ -47,6 +47,8 @@ import java.util.List;
 import java.util.Set;
 import java.lang.reflect.Field;
 
+import androidx.annotation.NonNull;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
@@ -55,6 +57,9 @@ public class MainActivity extends AppCompatActivity {
     
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable hideSystemUIRunnable = this::hideSystemUI;
+    
+    // 记录当前主页面位置
+    private int currentMainPage = 0;
 
     private TextView timeTextView, dateTextView;
     private ViewPager2 viewPager;
@@ -152,10 +157,13 @@ public class MainActivity extends AppCompatActivity {
                 } else if (currentFragment instanceof WorkspaceFragment) {
                     ((WorkspaceFragment) currentFragment).updatePageIndicator(position);
                 }
+                
+                // 记录当前页面位置，用于返回逻辑
+                currentMainPage = position;
             }
         });
         
-        // 更改ViewPager2的相关设置，移除默认的滑动效果
+        // 更改ViewPager2的相关设置，提高滑动灵敏度
         try {
             Field recyclerViewField = ViewPager2.class.getDeclaredField("mRecyclerView");
             recyclerViewField.setAccessible(true);
@@ -168,6 +176,16 @@ public class MainActivity extends AppCompatActivity {
             
             // 应用无分隔特效的简单动画
             recyclerView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+            
+            // 提高滑动灵敏度
+            try {
+                Field touchSlopField = RecyclerView.class.getDeclaredField("mTouchSlop");
+                touchSlopField.setAccessible(true);
+                int touchSlop = (int) touchSlopField.get(recyclerView);
+                touchSlopField.set(recyclerView, touchSlop * 0.7f); // 降低滑动阈值，提高灵敏度
+            } catch (Exception e) {
+                Log.e("MainActivity", "无法调整滑动灵敏度: " + e.getMessage());
+            }
         } catch (Exception e) {
             Log.e("MainActivity", "设置ViewPager2属性失败: " + e.getMessage());
         }
