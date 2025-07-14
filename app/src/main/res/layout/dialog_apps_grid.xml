@@ -42,11 +42,11 @@
                     android:id="@+id/dialogAppsGrid"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:alignmentMode="alignMargins"
                     android:columnCount="5"
                     android:rowCount="3"
-                    android:useDefaultMargins="true"
-                    android:alignmentMode="alignMargins"
-                    android:padding="16dp"/>
+                    android:padding="16px"
+                    android:useDefaultMargins="true" />
 
             </ScrollView>
 
@@ -55,7 +55,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="16px"
                 android:text="添加应用"
                 android:textColor="#333333"
                 android:background="?attr/selectableItemBackground"/>

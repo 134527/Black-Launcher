@@ -69,9 +69,11 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
         View leftIndicator = holder.itemView.findViewById(R.id.drag_indicator_left);
         View rightIndicator = holder.itemView.findViewById(R.id.drag_indicator_right);
         
-        // 只对非最左侧页显示左侧指示器，非最右侧页显示右侧指示器
-        leftIndicator.setVisibility(position > 0 ? View.GONE : View.GONE);
-        rightIndicator.setVisibility(position < getItemCount()-1 ? View.GONE : View.GONE);
+        // 左侧指示器仅在页面索引大于0时显示，否则隐藏
+        // 右侧指示器仅在页面索引小于最大页面索引时显示，否则隐藏
+        // 初始状态都隐藏，拖拽时才显示
+        leftIndicator.setVisibility(View.GONE);
+        rightIndicator.setVisibility(View.GONE);
         
         // 设置拖拽监听器
         setupDragListener(holder, position);
@@ -104,11 +106,17 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
             switch (event.getAction()) {
                 case DragEvent.ACTION_DRAG_STARTED:
                     isDragging = true;
-                    // 确保左侧指示器始终不可见，防止白条出现
-                    leftIndicator.setVisibility(View.GONE);
                     
-                    // 只显示右侧指示器，当有下一页时
-                    if (position < getItemCount() - 1) {
+                    // 设置左侧指示器，非第一页可见
+                    if (position > 0) {
+                        leftIndicator.setVisibility(View.VISIBLE);
+                        leftIndicator.setAlpha(0.5f);
+                    } else {
+                        leftIndicator.setVisibility(View.GONE);
+                    }
+                    
+                    // 显示右侧指示器，当有下一页或可创建新页面时
+                    if (position < getItemCount() - 1 || (cellOverflowListener != null && cellOverflowListener.canCreateNewPage())) {
                         rightIndicator.setVisibility(View.VISIBLE);
                         rightIndicator.setAlpha(0.5f);
                     } else {
@@ -151,6 +159,8 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
                     leftIndicator.setVisibility(View.GONE);
                     rightIndicator.setVisibility(View.GONE);
                     isDragging = false;
+                    // 重置滚动状态，防止下次拖拽时出现问题
+                    isScrolling = false;
                     return false; // 让CellLayout处理实际的放置操作
                 
                 case DragEvent.ACTION_DRAG_ENDED:
@@ -159,12 +169,12 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
                     leftIndicator.setVisibility(View.GONE);
                     rightIndicator.setVisibility(View.GONE);
                     isDragging = false;
+                    // 重置滚动相关状态
+                    isScrolling = false;
                     
                     // 记录日志以便追踪问题
                     boolean success = event.getResult();
-                    Log.d(TAG, "拖拽结果: " + (success ? "成功" : "失败") + 
-                          ", 将第一页的图标拖动到页面边缘时切存在第二页" + 
-                          (position > 0 ? "成功拖动到第" + (position + 1) + "页" : "无法拖动到第二页"));
+                    Log.d(TAG, "拖拽结果: " + (success ? "成功" : "失败"));
                     
                     return true;
             }
@@ -178,66 +188,119 @@ public class WorkspaceAdapter extends RecyclerView.Adapter<WorkspaceAdapter.Work
     private void handleEdgeDetection(DragEvent event, View itemView, int position) {
         if (parentViewPager == null) return;
         
-        // 获取拖拽位置相对于页面的百分比
-        float x = event.getX();
-        float pageWidth = itemView.getWidth();
-        float positionPercent = x / pageWidth;
-        
-        // 定义边缘区域大小（百分比）
-        float edgeThreshold = 0.15f;  
-        
-        // 只检测右侧边缘，左侧边缘逻辑已禁用
-        boolean isRightEdge = positionPercent > (1 - edgeThreshold) && position < getItemCount() - 1;
-        
-        // 获取边缘指示器
-        View leftIndicator = itemView.findViewById(R.id.drag_indicator_left);
-        View rightIndicator = itemView.findViewById(R.id.drag_indicator_right);
-        
-        // 确保左侧指示器始终不可见
-        leftIndicator.setVisibility(View.GONE);
-        
-        // 新增：记录切换时间
-        long currentTime = System.currentTimeMillis();
-        
-        // 右侧指示器只在有下一页时显示
-        if (position < getItemCount() - 1) {
-            rightIndicator.setVisibility(View.VISIBLE);
-        } else {
-            rightIndicator.setVisibility(View.GONE);
-        }
-        
-        // 静态变量控制页面切换状态
-        if (isScrolling && currentTime - lastScrollTime < SCROLL_THROTTLE_MS) {
-            return; // 如果正在滚动中且未超过阈值时间，则不触发
-        }
-        
-        // 只更新右侧指示器状态
-        if (isRightEdge) {
-            // 增强右侧指示器
-            rightIndicator.setBackgroundColor(Color.argb(100, 100, 180, 255));
-            rightIndicator.animate().alpha(0.9f).scaleX(1.2f).setDuration(100).start();
+        try {
+            // 获取拖拽位置相对于页面的百分比
+            float x = event.getX();
+            float pageWidth = itemView.getWidth();
+            float positionPercent = x / pageWidth;
             
-            // 检查当前是否已经在动画切换中
-            if (parentViewPager.getCurrentItem() == position && !isScrolling) {
-                // 设置滚动状态和时间
-                isScrolling = true;
-                lastScrollTime = currentTime;
-                
-                // 切换到下一页，使用平滑动画
-                parentViewPager.setCurrentItem(position + 1, true);
-                
-                // 记录日志
-                Log.d(TAG, "拖拽到右侧边缘，切换到页面: " + (position + 1));
-                
-                // 延迟恢复滚动状态，防止连续快速切换
-                new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    isScrolling = false;
-                }, SCROLL_DELAY_MS);
+            // 定义边缘区域大小（百分比）
+            float edgeThreshold = 0.15f;  
+            
+            // 同时检测左侧和右侧边缘
+            boolean isRightEdge = positionPercent > (1 - edgeThreshold) && position < getItemCount() - 1;
+            boolean isLeftEdge = positionPercent < edgeThreshold && position > 0;
+            
+            // 获取边缘指示器
+            View leftIndicator = itemView.findViewById(R.id.drag_indicator_left);
+            View rightIndicator = itemView.findViewById(R.id.drag_indicator_right);
+            
+            // 记录当前时间用于节流控制
+            long currentTime = System.currentTimeMillis();
+            
+            // 根据位置和页面状态设置指示器可见性
+            // 左侧指示器只在不是第一页时显示
+            if (position > 0) {
+                leftIndicator.setVisibility(View.VISIBLE);
+                leftIndicator.setAlpha(0.5f);
+            } else {
+                leftIndicator.setVisibility(View.GONE);
             }
-        } else if (rightIndicator.getVisibility() == View.VISIBLE) {
-            // 重置右侧指示器
-            rightIndicator.setBackgroundColor(Color.argb(50, 255, 255, 255));
-            rightIndicator.animate().alpha(0.5f).scaleX(1.0f).setDuration(100).start();
+            
+            // 右侧指示器只在有下一页或可以创建新页面时显示
+            if (position < getItemCount() - 1 || (cellOverflowListener != null && cellOverflowListener.canCreateNewPage())) {
+                rightIndicator.setVisibility(View.VISIBLE);
+                rightIndicator.setAlpha(0.5f);
+            } else {
+                rightIndicator.setVisibility(View.GONE);
+            }
+            
+            // 静态变量控制页面切换状态
+            if (isScrolling && currentTime - lastScrollTime < SCROLL_THROTTLE_MS) {
+                return; // 如果正在滚动中且未超过阈值时间，则不触发
+            }
+            
+            // 更新指示器状态并处理页面切换
+            if (isRightEdge) {
+                // 增强右侧指示器
+                rightIndicator.setBackgroundColor(Color.argb(100, 100, 180, 255));
+                rightIndicator.animate().alpha(0.9f).scaleX(1.2f).setDuration(100).start();
+                
+                // 检查当前是否已经在动画切换中
+                if (parentViewPager.getCurrentItem() == position && !isScrolling) {
+                    // 设置滚动状态和时间
+                    isScrolling = true;
+                    lastScrollTime = currentTime;
+                    
+                    try {
+                        // 切换到下一页，使用平滑动画
+                        parentViewPager.setCurrentItem(position + 1, true);
+                        
+                        // 记录日志
+                        Log.d(TAG, "拖拽到右侧边缘，切换到页面: " + (position + 1));
+                    } catch (Exception e) {
+                        Log.e(TAG, "切换页面失败: " + e.getMessage());
+                        isScrolling = false;
+                    }
+                    
+                    // 延迟恢复滚动状态，防止连续快速切换
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        isScrolling = false;
+                    }, SCROLL_DELAY_MS);
+                }
+            } else if (isLeftEdge) {
+                // 增强左侧指示器
+                leftIndicator.setBackgroundColor(Color.argb(100, 100, 180, 255));
+                leftIndicator.animate().alpha(0.9f).scaleX(1.2f).setDuration(100).start();
+                
+                // 检查当前是否已经在动画切换中
+                if (parentViewPager.getCurrentItem() == position && !isScrolling) {
+                    // 设置滚动状态和时间
+                    isScrolling = true;
+                    lastScrollTime = currentTime;
+                    
+                    try {
+                        // 切换到上一页，使用平滑动画
+                        parentViewPager.setCurrentItem(position - 1, true);
+                        
+                        // 记录日志
+                        Log.d(TAG, "拖拽到左侧边缘，切换到页面: " + (position - 1));
+                    } catch (Exception e) {
+                        Log.e(TAG, "切换页面失败: " + e.getMessage());
+                        isScrolling = false;
+                    }
+                    
+                    // 延迟恢复滚动状态，防止连续快速切换
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        isScrolling = false;
+                    }, SCROLL_DELAY_MS);
+                }
+            } else {
+                // 重置指示器
+                if (leftIndicator.getVisibility() == View.VISIBLE) {
+                    leftIndicator.setBackgroundColor(Color.argb(50, 255, 255, 255));
+                    leftIndicator.animate().alpha(0.5f).scaleX(1.0f).setDuration(100).start();
+                }
+                
+                if (rightIndicator.getVisibility() == View.VISIBLE) {
+                    rightIndicator.setBackgroundColor(Color.argb(50, 255, 255, 255));
+                    rightIndicator.animate().alpha(0.5f).scaleX(1.0f).setDuration(100).start();
+                }
+            }
+        } catch (Exception e) {
+            // 捕获并记录任何异常，防止崩溃
+            Log.e(TAG, "边缘检测异常: " + e.getMessage());
+            isScrolling = false;
         }
     }
     

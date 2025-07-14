@@ -28,6 +28,19 @@
         android:background="#33FFFFFF"
         android:visibility="gone" />
     
+    <!-- 左侧翻页指示器箭头 -->
+    <ImageView
+        android:id="@+id/left_page_arrow"
+        android:layout_width="24dp"
+        android:layout_height="48dp"
+        android:layout_gravity="center_vertical|start"
+        android:layout_marginStart="8dp"
+        android:src="@android:drawable/ic_media_previous"
+        android:tint="#FFFFFF"
+        android:alpha="0"
+        android:visibility="gone"
+        android:contentDescription="左侧翻页指示" />
+        
     <!-- 新页面创建指示器箭头 -->
     <ImageView
         android:id="@+id/new_page_arrow"

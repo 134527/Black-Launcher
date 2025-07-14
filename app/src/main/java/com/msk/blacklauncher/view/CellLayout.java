@@ -85,8 +85,16 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
     private static final long DRAG_FEEDBACK_INTERVAL = 200; // ms
     
     // 添加拖拽到边缘时创建页面的节流控制
-    private static final long EDGE_PAGE_CREATION_THROTTLE = 1500; // ms
+    private static final long EDGE_PAGE_CREATION_THROTTLE = 1200; // ms，减少等待时间
     private long lastEdgePageCreationAttemptTime = 0;
+    
+    // 添加防止连续创建页面的时间间隔
+    private static final long PAGE_CREATION_INTERVAL = 2500; // 减少到2.5秒防止创建多个页面
+    private long lastPageCreationTime = 0;
+    
+    // 添加变量追踪最后一次页面切换时间
+    private long lastPageSwitchTime = 0;
+    private static final long PAGE_SWITCH_INTERVAL = 800; // 页面切换间隔
     
     // 悬停预览相关变量
     private int lastHoverColumn = -1;
@@ -483,8 +491,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     isPreviewActive = false;
                     cancelPreviewAnimations();
                     
-                    // 显示左右拖拽区域指示器
-                    showDragIndicators(v);
+
                     
                     Log.d(TAG, "拖动开始 - X: " + lastDragX + ", Y: " + lastDragY);
                     return true;
@@ -518,9 +525,8 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     // 确保拖拽状态下高亮始终无效
                     highLightValid = false;
                     
-                    // 如果位置发生变化，重置悬停计时器
-                    boolean positionChanged = highlightCol != lastHoverColumn || highlightRow != lastHoverRow;
-                    if (positionChanged) {
+                    // 记录当前悬停的位置（用于DROP时交换图标）
+                    if (highlightCol != lastHoverColumn || highlightRow != lastHoverRow) {
                         // 取消之前的预览效果，确保图标恢复可见
                         if (isPreviewActive) {
                             // 保存是否需要恢复图标可见性
@@ -550,84 +556,136 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                         // 关闭所有ShortcutMenuView活跃菜单
                         ShortcutMenuView.dismissActiveMenus();
                         
-                        // 记录新的悬停位置和时间
+                        // 记录新的悬停位置
                         lastHoverColumn = highlightCol;
                         lastHoverRow = highlightRow;
-                        hoverStartTime = System.currentTimeMillis();
-                    } else if (!isPreviewActive) {
-                        // 位置没变，检查是否需要显示预览
-                        long currentTime = System.currentTimeMillis();
-                        long hoverTime = currentTime - hoverStartTime;
-                        
-                        if (hoverTime >= HOVER_PREVIEW_DELAY && 
-                            lastHoverColumn >= 0 && lastHoverRow >= 0) {
-                            // 显示预览效果前也关闭菜单
-                            ShortcutMenuView.dismissActiveMenus();
-                            
-                            // 显示预览效果
-                            showPreviewAnimation(lastHoverColumn, lastHoverRow);
-                        }
                     }
                     
                     // 检测是否靠近屏幕边缘 - 优化的边缘检测逻辑
-                    int edgeSize = (int)(Math.min(per_cell_width, per_cell_height) * 0.8f); // 减小边缘区域大小，提高灵敏度
+                    int edgeSize = (int)(Math.min(per_cell_width, per_cell_height) * 0.7f); // 减小边缘区域大小，提高灵敏度
                     boolean isNearLeftEdge = x < edgeSize;
                     boolean isNearRightEdge = x > getWidth() - edgeSize;
                     
                     // 获取当前时间，用于节流控制
                     long currentTime = System.currentTimeMillis();
                     
+                    // 获取当前页面索引
+                    int currentPage = -1;
+                    ViewPager2 viewPager = getMainActivityViewPager();
+                    if (viewPager != null) {
+                        currentPage = viewPager.getCurrentItem();
+                    }
+                    
+                    // 检查当前页面是否已满，如果已满则降低创建新页面的门槛
+                    boolean isCurrentPageFull = isPageFull();
+                    if (isCurrentPageFull) {
+                        // 如果当前页面已满，减小边缘区域大小使创建更容易触发
+                        edgeSize = (int)(Math.min(per_cell_width, per_cell_height) * 0.9f);
+                        isNearRightEdge = x > getWidth() - edgeSize;
+                    }
+                    
+                    // 增加对左侧边缘检测的响应度
+                    if (currentPage > 0) {
+                        // 如果不是第一页，减小左侧边缘区域大小提高灵敏度
+                        int leftEdgeSize = (int)(Math.min(per_cell_width, per_cell_height) * 0.6f);
+                        isNearLeftEdge = x < leftEdgeSize;
+                    }
+                    
+                    // 检测边缘滑动逻辑
+                    if (isNearLeftEdge && currentPage > 0) {
+                        // 处理左侧边缘检测 - 滑动到前一个页面
+                        float leftEdgeProgress = 1.0f - (x / edgeSize); // 值从0到1
+                        leftEdgeProgress = Math.min(1.0f, Math.max(0.0f, leftEdgeProgress));
+                        
+                        // 检查时间间隔以避免频繁切换
+                        boolean canSwitchPage = (currentTime - lastPageSwitchTime) > PAGE_SWITCH_INTERVAL;
+                        
+
+                        
+                        if (canSwitchPage && leftEdgeProgress > 0.7f) {
+                            // 切换到前一个页面
+                            lastPageSwitchTime = currentTime;
+                            
+                            if (viewPager != null) {
+                                viewPager.setCurrentItem(currentPage - 1, true);
+                                Log.d(TAG, "拖拽到左侧边缘，切换到页面: " + (currentPage - 1));
+                                
+                                // 拖拽的Cell也应该移动到前一页
+                                if (event.getLocalState() instanceof Cell) {
+                                    Cell dragCell = (Cell) event.getLocalState();
+                                    String packageName = dragCell.getTag();
+                                    
+                                    if (packageName != null && !packageName.contains(":cross_page")) {
+                                        // 标记为跨页面拖拽，并记录源页面
+                                        dragCell.setTag(packageName + ":cross_page:" + currentPage + ":" + currentTime);
+                                        Log.d(TAG, "标记跨页面拖拽到前一页: " + dragCell.getTag());
+                                        
+                                        // 保存原始页面信息
+                                        dragCell.setExpectColumnIndex(0);
+                                        dragCell.setExpectRowIndex(currentPage);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     // 检测是否靠近屏幕右边缘 - 改进边缘创建页面逻辑
-                    if (isNearRightEdge && cellOverflowListener != null) {
+                    else if (isNearRightEdge && cellOverflowListener != null) {
                         // 根据拖动位置在边缘区域的深入程度计算创建页面的紧急度
                         float edgeProgress = (x - (getWidth() - edgeSize)) / edgeSize; // 值从0到1
                         edgeProgress = Math.min(1.0f, Math.max(0.0f, edgeProgress));
                         
-                        // 根据紧急度动态调整节流时间，越靠近边缘越快响应
-                        long throttleTime = (long)(EDGE_PAGE_CREATION_THROTTLE * (1.0f - edgeProgress * 0.7f));
+                        // 根据紧急度和页面是否已满动态调整节流时间
+                        float throttleMultiplier = isCurrentPageFull ? 0.5f : (1.0f - edgeProgress * 0.7f);
+                        long throttleTime = (long)(EDGE_PAGE_CREATION_THROTTLE * throttleMultiplier);
                         
                         // 降低节流时间，使响应更快
-                        throttleTime = Math.min(throttleTime, 800); // 最大节流时间为800ms
+                        throttleTime = Math.min(throttleTime, isCurrentPageFull ? 500 : 800); // 当页面已满时更快响应
                         
                         // 判断是否可以尝试创建新页面（根据紧急度动态节流控制）
                         boolean canCreatePage = (currentTime - lastEdgePageCreationAttemptTime) > throttleTime;
                         
-                        // 更新右侧指示器的视觉反馈，根据紧急度调整透明度和大小
-                        updateEdgeIndicatorFeedback(v, edgeProgress);
+                        // 添加防止连续创建页面的判断
+                        boolean notRecentlyCreatedPage = (currentTime - lastPageCreationTime) > PAGE_CREATION_INTERVAL;
                         
-                        if (canCreatePage) {
+                        // 确保页面切换间隔足够
+                        boolean canSwitchPage = (currentTime - lastPageSwitchTime) > PAGE_SWITCH_INTERVAL;
+                        
+
+                        
+                        if (canCreatePage && notRecentlyCreatedPage && canSwitchPage) {
                             // 更新尝试创建页面的时间
                             lastEdgePageCreationAttemptTime = currentTime;
+                            lastPageSwitchTime = currentTime;
                             
-                            // 获取当前页面
-                            ViewParent parent = getParent();
-                            int currentPage = -1;
-                            ViewPager2 viewPager = null;
+                            // 获取MainActivity中的ViewPager2
+                            ViewPager2 viewPager2 = getMainActivityViewPager();
+                            int currentPage2 = -1;
                             
-                            while (parent != null && !(parent.getParent() instanceof ViewPager2)) {
-                                parent = parent.getParent();
-                            }
-                            
-                            if (parent != null) {
-                                ViewGroup viewPagerContent = (ViewGroup) parent;
-                                viewPager = (ViewPager2) viewPagerContent.getParent();
-                                currentPage = viewPager.getCurrentItem();
-                            
-                            int pageCount = cellOverflowListener.getPageCount();
-                            
+                            if (viewPager2 != null) {
+                                currentPage = viewPager2.getCurrentItem();
+                                int pageCount = cellOverflowListener.getPageCount();
+                                
                                 // 检查是否允许创建新页面或者已经存在下一页
-                                if (cellOverflowListener.canCreateNewPage() || (currentPage < pageCount - 1)) {
+                                if (cellOverflowListener.canCreateNewPage() || (currentPage < pageCount - 1) || isCurrentPageFull) {
                                     // 获取当前拖拽的单元格
                                     localState = event.getLocalState();
                                     
-                                    // 震动反馈 - 根据不同Android版本使用不同方式
+                                    // 震动反馈 - 根据页面是否已满调整震动强度
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                        // 使用新API提供更精确的触感反馈
                                         try {
-                                            VibrationEffect effect = VibrationEffect.createOneShot(
-                                                    40, // 短暂振动40毫秒
-                                                    VibrationEffect.DEFAULT_AMPLITUDE
-                                            );
+                                            VibrationEffect effect;
+                                            if (isCurrentPageFull) {
+                                                // 页面已满时使用更强烈的震动反馈
+                                                effect = VibrationEffect.createOneShot(
+                                                        50, // 稍长的振动
+                                                        VibrationEffect.DEFAULT_AMPLITUDE
+                                                );
+                                            } else {
+                                                effect = VibrationEffect.createOneShot(
+                                                        40, // 标准振动
+                                                        VibrationEffect.DEFAULT_AMPLITUDE
+                                                );
+                                            }
                                             Vibrator vibrator = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
                                             if (vibrator != null) {
                                                 vibrator.vibrate(effect);
@@ -645,6 +703,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                     showPageCreationFeedback();
                                     
                                     int targetPageIndex;
+                                    boolean isNewlyCreatedPage = false;
                                     
                                     // 判断是创建新页面还是使用已存在的下一页
                                     if (currentPage < pageCount - 1) {
@@ -654,7 +713,11 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                     } else {
                                         // 如果是最后一页，创建新页面
                                         targetPageIndex = cellOverflowListener.createNewPage();
+                                        isNewlyCreatedPage = true;
                                         Log.d(TAG, "创建新页面，索引为 " + targetPageIndex);
+                                        
+                                        // 更新最后创建页面的时间
+                                        lastPageCreationTime = currentTime;
                                     }
                                     
                                     if (localState instanceof Cell) {
@@ -664,7 +727,8 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                         
                                         // 标记为跨页面拖拽，并记录源页面
                                         if (packageName != null && !packageName.contains(":cross_page")) {
-                                            dragCell.setTag(packageName + ":cross_page:" + currentPage);
+                                            // 添加当前时间戳防止重复创建
+                                            dragCell.setTag(packageName + ":cross_page:" + currentPage + ":" + currentTime);
                                             Log.d(TAG, "标记跨页面拖拽: " + dragCell.getTag());
                                             
                                             // 如果当前拖动的视图为隐藏状态，确保它在目标页面可见
@@ -680,21 +744,24 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                     }
                                     
                                     // 平滑滚动到目标页面
-                                    if (viewPager != null) {
+                                    if (viewPager2 != null) {
+                                        final boolean finalIsNewlyCreatedPage = isNewlyCreatedPage;
+                                        
                                         // 使用更平滑的动画过渡到目标页面
-                                        viewPager.setCurrentItem(targetPageIndex, true);
+                                        viewPager2.setCurrentItem(targetPageIndex, true);
                                         
                                         // 提供拖拽反馈
                                         if (localState instanceof Cell) {
                                             // 确保用户可以通过返回按钮返回到原始页面
-                                            View rootView = viewPager.getRootView();
+                                            View rootView = viewPager2.getRootView();
                                             if (rootView.getContext() instanceof Activity) {
                                                 Activity activity = (Activity) rootView.getContext();
                                                 try {
-                                                    // 显示临时提示，告知用户可以返回
-                                                    Toast.makeText(activity, 
-                                                        "您可以点击返回按钮回到原页面", 
-                                                        Toast.LENGTH_SHORT).show();
+                                                    // 根据页面是否已满显示不同提示
+                                                    String toastMsg = isCurrentPageFull ? 
+                                                        "当前页面已满，已自动创建新页面" : 
+                                                        "您可以点击返回按钮回到原页面";
+                                                    Toast.makeText(activity, toastMsg, Toast.LENGTH_SHORT).show();
                                                 } catch (Exception e) {
                                                     Log.e(TAG, "显示返回提示失败", e);
                                                 }
@@ -714,7 +781,15 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                                 // 确保其他应用图标可以拖到目标页面中
                                                 View targetPageView = getViewForPage(finalViewPager, finalTargetPageIndex);
                                                 if (targetPageView != null) {
+                                                    // 查找目标页面上的CellLayout
+                                                    // 首先尝试使用R.id.workspace_grid
                                                     CellLayout targetPageCellLayout = targetPageView.findViewById(R.id.workspace_grid);
+                                                    
+                                                    // 如果找不到，尝试通用查找方法
+                                                    if (targetPageCellLayout == null) {
+                                                        targetPageCellLayout = findCellLayoutInViewGroup(targetPageView);
+                                                    }
+                                                    
                                                     if (targetPageCellLayout != null) {
                                                         // 确保目标页面的CellLayout也具有相同的监听器和配置
                                                         targetPageCellLayout.setOnCellOverflowListener(cellOverflowListener);
@@ -723,7 +798,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                                         targetPageCellLayout.setColumns(columns);
                                                         
                                                         // 如果是新创建的页面，需要填充空白单元格
-                                                        if (finalCurrentPage == pageCount - 1) {
+                                                        if (finalIsNewlyCreatedPage) {
                                                             // 填充空白单元格
                                                             targetPageCellLayout.fillEmptyCells();
                                                             
@@ -734,21 +809,35 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                                                     targetPageCellLayout.addCell(cell);
                                                                 }
                                                             }
+                                                            
+                                                            // 如果是由于页面已满自动创建的，需要适当安排图标位置
+                                                            if (isCurrentPageFull && localState instanceof Cell) {
+                                                                // 尝试找到合适的空白位置
+                                                                targetPageCellLayout.reservePositionForDragCell((Cell)localState);
+                                                            }
                                                         }
                                                         
+                                                        // 通知适配器数据已更改
+                                                        cellOverflowListener.notifyPageAdapterChanged();
+                                                        
                                                         Log.d(TAG, "已为目标页面设置CellOverflowListener和拖拽监听器，确保拖拽功能正常");
+                                                    } else {
+                                                        Log.e(TAG, "无法在目标页面找到CellLayout");
                                                     }
+                                                } else {
+                                                    Log.e(TAG, "无法获取目标页面视图");
                                                 }
-                                            }, 200); // 增加延迟时间确保页面完全创建
+                                            }, 250); // 增加延迟时间确保页面完全创建
                                         }
                                     }
                                 }
+                            } else {
+                                Log.e(TAG, "无法获取MainActivity中的ViewPager2");
                             }
                         }
                     }
                     
-                    // 更新边缘指示器可见性
-                    updateDragIndicators(v, isNearLeftEdge, isNearRightEdge);
+
                     
                     // 检查时间间隔，避免频繁触发
                     if (currentTime - lastDragEventTime > DRAG_FEEDBACK_INTERVAL) {
@@ -783,8 +872,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                         isPreviewActive = false;
                     }
                     
-                    // 隐藏拖拽指示器
-                    hideDragIndicators(v);
+
                     
                     return true;
 
@@ -802,11 +890,10 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                         isPreviewActive = false;
                     }
                     
-                    // 隐藏拖拽指示器
-                    hideDragIndicators(v);
+
                     
                     // 获取拖动中的数据对象（单元格）
-                     localState = event.getLocalState();
+                    localState = event.getLocalState();
                     Cell dragCell = null;
                     int fromPage = -1;
                     
@@ -818,11 +905,17 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                         boolean isCrossPageDrag = tag != null && tag.contains(":cross_page");
                         
                         if (isCrossPageDrag) {
-                            // 提取源页面索引
+                            // 提取源页面索引 - 修复格式为 packageName:cross_page:pageIndex:timestamp
                             String[] parts = tag.split(":");
                             if (parts.length >= 3) {
                                 try {
-                                    fromPage = Integer.parseInt(parts[parts.length - 1]);
+                                    // 正确提取页面索引 (在cross_page后的第一个部分)
+                                    if (parts.length >= 4 && "cross_page".equals(parts[parts.length - 3])) {
+                                        fromPage = Integer.parseInt(parts[parts.length - 2]);
+                                    } else {
+                                        // 兼容旧格式
+                                        fromPage = Integer.parseInt(parts[parts.length - 1]);
+                                    }
                                 } catch (NumberFormatException e) {
                                     Log.e(TAG, "解析源页面索引失败", e);
                                 }
@@ -830,6 +923,30 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                             
                             // 还原标签
                             dragCell.setTag(tag.substring(0, tag.indexOf(":cross_page")));
+                        } else {
+                            // 非跨页面拖拽，这里执行图标位置交换
+                            // 计算目标位置
+                            int targetColumn = Math.min(columns - 1, Math.max(0, (int)(event.getX() / per_cell_width)));
+                            int targetRow = Math.min(rows - 1, Math.max(0, (int)(event.getY() / per_cell_height)));
+                            int targetIndex = targetRow * columns + targetColumn;
+                            
+                            // 如果有拖拽源单元格，且目标位置索引有效，直接交换
+                            if (dragSourceIndex >= 0 && targetIndex >= 0 && 
+                                targetIndex < cells.size() && targetIndex != dragSourceIndex) {
+                                
+                                Cell targetCell = cells.get(targetIndex);
+                                
+                                // 根据目标单元格类型执行交换
+                                if (targetCell.getTag().equals("empty")) {
+                                    // 空白单元格 - 交换位置
+                                    swapCells(dragSourceIndex, targetIndex);
+                                    Log.d(TAG, "放置时交换：应用图标与空白单元格: " + dragSourceIndex + " <-> " + targetIndex);
+                                } else {
+                                    // 非空单元格 - 交换位置
+                                    swapCells(dragSourceIndex, targetIndex);
+                                    Log.d(TAG, "放置时交换：应用图标与其他图标: " + dragSourceIndex + " <-> " + targetIndex);
+                                }
+                            }
                         }
                     }
                     
@@ -842,49 +959,12 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                         contentView.setScaleY(1.0f);
                     }
                     
-                    // 找到拖动的单元格在当前页面中的索引
-                    int dragCellIndex = dragSourceIndex;
-                    if (dragCellIndex < 0) {
-                        for (int i = 0; i < cells.size(); i++) {
-                            Cell cell = cells.get(i);
-                            if (cell == dragCell || (cell.getTag() != null && dragCell != null &&
-                                    cell.getTag().equals(dragCell.getTag()))) {
-                                dragCellIndex = i;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // 如果是从其他页面拖过来的，dragCellIndex可能为-1
-                    
-                    // 计算目标位置
-                    int targetColumn = Math.min(columns - 1, Math.max(0, (int)(event.getX() / per_cell_width)));
-                    int targetRow = Math.min(rows - 1, Math.max(0, (int)(event.getY() / per_cell_height)));
-                    int targetIndex = targetRow * columns + targetColumn;
-
-                    // 确保目标索引有效
-                    if (targetIndex >= 0 && targetIndex < cells.size()) {
-                        // 处理源位于当前页面的情况
-                        if (dragCellIndex >= 0) {
-                            Cell targetCell = cells.get(targetIndex);
-
-                            // 判断目标单元格类型并采用不同处理方式
-                            if (targetCell.getTag().equals("empty")) {
-                                // 空白单元格 - 直接交换位置
-                                swapCells(dragCellIndex, targetIndex);
-                                Log.d(TAG, "将应用图标与空白单元格交换: " + dragCellIndex + " <-> " + targetIndex);
-                            } else {
-                                // 非空单元格 - 插入并移动
-                                moveCells(dragCellIndex, targetIndex);
-                                Log.d(TAG, "将应用图标移动至非空单元格: " + dragCellIndex + " -> " + targetIndex);
-                            }
-                        } else if (dragCell != null) {
-                            // 处理源来自不同页面的情况
-                            if (dragCell != null && cellOverflowListener != null) {
+                    // 处理跨页面拖拽的情况
+                    if (dragCell != null && fromPage >= 0 && cellOverflowListener != null) {
                                 // 获取当前页面索引
                                 ViewParent parent = getParent();
-                                int currentPage = -1;
-                                ViewPager2 viewPager = null;
+                                int currentPage2 = -1;
+                                ViewPager2 viewPager3 = null;
                                 
                                 while (parent != null && !(parent.getParent() instanceof ViewPager2)) {
                                     parent = parent.getParent();
@@ -892,8 +972,13 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                 
                                 if (parent != null) {
                                     ViewGroup viewPagerContent = (ViewGroup) parent;
-                                    viewPager = (ViewPager2) viewPagerContent.getParent();
-                                    currentPage = viewPager.getCurrentItem();
+                                    viewPager3 = (ViewPager2) viewPagerContent.getParent();
+                                    currentPage = viewPager3.getCurrentItem();
+                            
+                            // 计算目标位置
+                            int targetColumn = Math.min(columns - 1, Math.max(0, (int)(event.getX() / per_cell_width)));
+                            int targetRow = Math.min(rows - 1, Math.max(0, (int)(event.getY() / per_cell_height)));
+                            int targetIndex = targetRow * columns + targetColumn;
                                     
                                     // 添加日志以确认当前页面和源页面
                                     Log.d(TAG, "跨页面拖拽: 从页面 " + fromPage + " 到页面 " + currentPage + 
@@ -925,7 +1010,6 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                                 }
                                             }
                                         }, 300); // 增加延迟确保UI已稳定
-                                    }
                                 }
                             }
                         }
@@ -933,7 +1017,6 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                         // 通知更新保存位置
                         if (cellOverflowListener != null) {
                             cellOverflowListener.saveAppPositions();
-                        }
                     }
                     
                     // 在处理完拖放后，确保所有图标可见
@@ -963,8 +1046,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                     // 确保所有图标可见
                     ensureAllIconsVisible();
                     
-                    // 隐藏拖拽指示器
-                    hideDragIndicators(v);
+
                     
                     // 检查是否是跨页面拖拽且失败的情况，需要返回到原始页面
                     if (!success && currentDragCell != null) {
@@ -984,7 +1066,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                             
                             // 获取ViewPager并返回原始页面
                             ViewParent parent = getParent();
-                            ViewPager2 viewPager = null;
+                            ViewPager2 viewPager4 = null;
                             
                             while (parent != null && !(parent.getParent() instanceof ViewPager2)) {
                                 parent = parent.getParent();
@@ -992,11 +1074,11 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                             
                             if (parent != null && originalPage >= 0) {
                                 ViewGroup viewPagerContent = (ViewGroup) parent;
-                                viewPager = (ViewPager2) viewPagerContent.getParent();
+                                viewPager4 = (ViewPager2) viewPagerContent.getParent();
                                 
                                 // 返回原始页面
                                 Log.d(TAG, "拖拽失败，返回原始页面: " + originalPage);
-                                viewPager.setCurrentItem(originalPage, true);
+                                viewPager4.setCurrentItem(originalPage, true);
                                 
                                 // 确保单元格视图可见
                                 if (dragCell.getContentView() != null) {
@@ -1004,7 +1086,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                                 }
                                 
                                 // 弹出提示
-                                Context context = viewPager.getContext();
+                                Context context = viewPager4.getContext();
                                 if (context != null) {
                                     Toast.makeText(context, "拖拽未完成，已返回原始页面", Toast.LENGTH_SHORT).show();
                                 }
@@ -1065,8 +1147,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
             // 确保所有图标可见
             ensureAllIconsVisible();
             
-            // 隐藏拖拽指示器
-            hideDragIndicators(v);
+
             
             invalidate();
         }
@@ -1233,6 +1314,13 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
     }
 
     // 修改跨页面拖拽代码
+    /**
+     * 处理跨页面拖放逻辑
+     * @param dragCell 拖拽的单元格
+     * @param targetIndex 目标位置索引
+     * @param fromPage 源页面索引
+     * @param currentPage 当前页面索引
+     */
     private void handleCrossPageDrop(Cell dragCell, int targetIndex, int fromPage, int currentPage) {
         if (dragCell == null || cellOverflowListener == null) return;
         
@@ -1243,9 +1331,15 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                 contentView.setVisibility(View.VISIBLE);
                 contentView.setAlpha(1.0f);
                 
-                // 不使用动画
-                contentView.setScaleX(1.0f);
-                contentView.setScaleY(1.0f);
+                // 使用弹性动画效果增强交互体验
+                contentView.setScaleX(0.8f);
+                contentView.setScaleY(0.8f);
+                contentView.animate()
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .setDuration(250)
+                    .setInterpolator(new OvershootInterpolator(0.8f))
+                    .start();
             }
             
             // 确保原标签已恢复（移除跨页面标记）
@@ -1254,16 +1348,105 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                 dragCell.setTag(tag.substring(0, tag.indexOf(":cross_page")));
             }
             
+            // 检查目标页面是否已满
+            boolean isTargetPageFull = isPageFull(2); // 需要至少2个空位
+            
+            if (isTargetPageFull) {
+                // 如果目标页面已满，尝试找到更多空间
+                Log.w(TAG, "目标页面空间不足，尝试处理页面溢出");
+                
+                // 震动反馈提示空间不足
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        VibrationEffect effect = VibrationEffect.createOneShot(
+                                70, VibrationEffect.DEFAULT_AMPLITUDE);
+                        Vibrator vibrator = (Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
+                        if (vibrator != null) {
+                            vibrator.vibrate(effect);
+                        }
+                    } else {
+                        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "震动反馈错误", e);
+                }
+                
+                // 显示提示
+                Context context = getContext();
+                if (context != null) {
+                    Toast.makeText(context, "当前页面空间不足，尝试放置到下一页", Toast.LENGTH_SHORT).show();
+                }
+                
+                // 尝试处理溢出（创建或切换到下一页）
+                boolean handled = handlePageOverflow(dragCell);
+                
+                if (handled) {
+                    // 如果成功处理了溢出，返回
+                    return;
+                }
+                
+                // 如果处理失败，尝试挤一挤放进去
+                Log.d(TAG, "无法创建新页面，尝试在当前页面放置");
+            }
+            
             // 如果是空白位置直接放置，否则尝试使用moveCells
-            Cell targetCell = cells.get(targetIndex);
-            if (targetCell.getTag().equals("empty")) {
+            Cell targetCell = targetIndex < cells.size() ? cells.get(targetIndex) : null;
+            if (targetCell == null || targetCell.getTag().equals("empty")) {
                 // 确保单元格大小正确
                 dragCell.setWidthNum(1);
                 dragCell.setHeightNum(1);
-                cells.set(targetIndex, dragCell);
-                Log.d(TAG, "成功放置跨页面应用到空白位置: " + targetIndex);
+                
+                // 安全检查
+                if (targetIndex >= 0 && targetIndex < cells.size()) {
+                    cells.set(targetIndex, dragCell);
+                    Log.d(TAG, "成功放置跨页面应用到空白位置: " + targetIndex);
+                } else {
+                    // 如果目标索引无效，寻找任意空位
+                    int emptyIndex = -1;
+                    for (int i = 0; i < cells.size(); i++) {
+                        if (cells.get(i).getTag().equals("empty")) {
+                            emptyIndex = i;
+                            break;
+                        }
+                    }
+                    
+                    if (emptyIndex >= 0) {
+                        cells.set(emptyIndex, dragCell);
+                        Log.d(TAG, "成功放置跨页面应用到空白位置: " + emptyIndex);
+                    } else {
+                        // 没有空位，尝试挤到第一个位置
+                        Log.w(TAG, "没有空白位置，尝试放置到第一个位置");
+                        dragCell.setWidthNum(1);
+                        dragCell.setHeightNum(1);
+                        
+                        // 先备份第一个位置的图标
+                        Cell firstCell = cells.get(0);
+                        
+                        // 设置到第一个位置
+                        cells.set(0, dragCell);
+                        
+                        // 尝试为原来第一个位置的图标找空间
+                        if (!firstCell.getTag().equals("empty")) {
+                            // 如果之前的图标不是空白，尝试找空间放置
+                            boolean handledFirstCell = handlePageOverflow(firstCell);
+                            
+                            // 如果处理失败，只能放回到最后一个位置
+                            if (!handledFirstCell) {
+                                for (int i = cells.size() - 1; i >= 0; i--) {
+                                    if (cells.get(i).getTag().equals("empty")) {
+                                        cells.set(i, firstCell);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
-                // 寻找空位
+                // 目标位置已有图标，尝试交换
+                Log.d(TAG, "目标位置有图标，尝试交换位置");
+                
+                // 先查找空位
                 int emptyIndex = -1;
                 for (int i = 0; i < cells.size(); i++) {
                     if (cells.get(i).getTag().equals("empty")) {
@@ -1273,26 +1456,94 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
                 }
                 
                 if (emptyIndex >= 0) {
-                    // 先放在空位
+                    // 如果有空位，先放到空位然后再移动到目标位置
                     dragCell.setWidthNum(1);
                     dragCell.setHeightNum(1);
                     cells.set(emptyIndex, dragCell);
                     
                     // 然后移动到目标位置
                     moveCells(emptyIndex, targetIndex);
+                    
+                    // 使用动画效果增强交换体验
+                    View targetView = targetCell.getContentView();
+                    if (targetView != null) {
+                        targetView.animate()
+                            .alpha(0.5f)
+                            .scaleX(0.9f)
+                            .scaleY(0.9f)
+                            .setDuration(150)
+                            .withEndAction(() -> {
+                                targetView.animate()
+                                    .alpha(1.0f)
+                                    .scaleX(1.0f)
+                                    .scaleY(1.0f)
+                                    .setDuration(200)
+                                    .start();
+                            })
+                            .start();
+                    }
+                    
                     Log.d(TAG, "已将跨页面应用放置到位置 " + targetIndex);
                 } else {
-                    // 没有空位，添加到末尾
-                    Log.w(TAG, "无法找到空位放置跨页面应用，使用第一个位置");
-                    dragCell.setWidthNum(1);
-                    dragCell.setHeightNum(1);
-                    cells.set(0, dragCell);
+                    // 如果没有空位，尝试直接交换两个单元格
+                    Cell temp = cells.get(targetIndex);
+                    cells.set(targetIndex, dragCell);
+                    
+                    // 尝试为被交换出来的单元格找空间
+                    // 优先放到源页面
+                    boolean handledDisplacedCell = false;
+                    
+                    if (fromPage != currentPage) {
+                        // 暂存当前页面索引
+                        temp.setExpectRowIndex(currentPage);
+                        
+                        // 尝试处理页面溢出（放回源页面）
+                        handledDisplacedCell = cellOverflowListener.requestReturnToPage(temp, fromPage);
+                    }
+                    
+                    // 如果无法放回源页面，尝试找下一页
+                    if (!handledDisplacedCell) {
+                        handledDisplacedCell = handlePageOverflow(temp);
+                    }
+                    
+                    // 如果处理失败，尝试强制放置在当前页面
+                    if (!handledDisplacedCell) {
+                        Log.w(TAG, "无法为交换出的图标找到位置，尝试在当前页面找空间");
+                        
+                        // 简单放置在最后一个位置
+                        for (int i = cells.size() - 1; i >= 0; i--) {
+                            // 避免覆盖刚刚放置的图标
+                            if (i != targetIndex && cells.get(i).getTag().equals("empty")) {
+                                cells.set(i, temp);
+                                handledDisplacedCell = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!handledDisplacedCell) {
+                        Log.e(TAG, "严重错误：无法为交换出的图标找到任何位置");
+                        // 显示错误提示
+                        Toast.makeText(getContext(), 
+                            "无法找到足够空间放置图标，请清理部分图标", 
+                            Toast.LENGTH_SHORT).show();
+                    }
                 }
             }
             
             // 请求重新布局
             requestLayout();
             invalidate();
+            
+            // 如果是跨页面操作，更新两个页面
+            if (fromPage != currentPage) {
+                cellOverflowListener.notifyPageDataChanged(fromPage);
+                cellOverflowListener.notifyPageDataChanged(currentPage);
+            }
+            
+            // 保存应用位置
+            cellOverflowListener.saveAppPositions();
+            
         } catch (Exception e) {
             Log.e(TAG, "处理跨页面拖拽图标放置失败: " + e.getMessage(), e);
         }
@@ -1576,6 +1827,26 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
          * @return 单元格列表，如果页面不存在则返回null
          */
         List<Cell> getPageCells(int pageIndex);
+        
+        /**
+         * 通知页面适配器数据已更改
+         * 用于刷新ViewPager2
+         */
+        void notifyPageAdapterChanged();
+        
+        /**
+         * 请求将单元格返回到指定页面
+         * @param cellToMove 需要移动的单元格
+         * @param targetPageIndex 目标页面索引
+         * @return 如果成功处理返回true
+         */
+        boolean requestReturnToPage(Cell cellToMove, int targetPageIndex);
+        
+        /**
+         * 通知指定页面的数据已更改
+         * @param pageIndex 页面索引
+         */
+        void notifyPageDataChanged(int pageIndex);
     }
 
     private OnCellOverflowListener cellOverflowListener;
@@ -1584,100 +1855,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         this.cellOverflowListener = listener;
     }
 
-    // 新增方法：显示拖拽区域指示器
-    private void showDragIndicators(View view) {
-        ViewGroup parent = (ViewGroup) view.getParent();
-        if (parent != null) {
-            View leftIndicator = parent.findViewById(R.id.drag_indicator_left);
-            View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
-            
-            if (leftIndicator != null && rightIndicator != null) {
-                // 始终隐藏左侧指示器，防止白条出现
-                leftIndicator.setVisibility(View.GONE);
-                rightIndicator.setVisibility(View.VISIBLE);
-                
-                // 只对右侧指示器应用渐变动画
-                rightIndicator.setAlpha(0f);
-                
-                // 使用硬件加速提高动画性能
-                rightIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
-                
-                rightIndicator.animate()
-                    .alpha(1f)
-                    .setDuration(200)
-                    .withEndAction(() -> rightIndicator.setLayerType(LAYER_TYPE_NONE, null))
-                    .start();
-            }
-        }
-    }
 
-    // 新增方法：更新拖拽区域指示器状态
-    private void updateDragIndicators(View view, boolean isNearLeft, boolean isNearRight) {
-        ViewGroup parent = (ViewGroup) view.getParent();
-        if (parent != null) {
-            View leftIndicator = parent.findViewById(R.id.drag_indicator_left);
-            View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
-            
-            if (leftIndicator != null && rightIndicator != null) {
-                // 始终隐藏左侧指示器
-                leftIndicator.setVisibility(View.GONE);
-                
-                // 只处理右侧指示器
-                if (isNearRight) {
-                    rightIndicator.setBackgroundColor(Color.argb(100, 100, 180, 255));
-                    
-                    // 仅当状态改变时应用动画
-                    if (rightIndicator.getScaleX() < 1.15f) {
-                        rightIndicator.animate()
-                            .scaleX(1.2f)
-                            .scaleY(1.05f)
-                            .setInterpolator(new OvershootInterpolator(0.5f))
-                            .setDuration(150)
-                            .start();
-                    }
-                } else {
-                    rightIndicator.setBackgroundColor(Color.argb(50, 255, 255, 255));
-                    
-                    // 仅当状态改变时应用动画
-                    if (rightIndicator.getScaleX() > 1.05f) {
-                        rightIndicator.animate()
-                            .scaleX(1.0f)
-                            .scaleY(1.0f)
-                            .setDuration(100)
-                            .start();
-                    }
-                }
-            }
-        }
-    }
-
-    // 新增方法：隐藏拖拽区域指示器
-    private void hideDragIndicators(View view) {
-        ViewGroup parent = (ViewGroup) view.getParent();
-        if (parent != null) {
-            View leftIndicator = parent.findViewById(R.id.drag_indicator_left);
-            View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
-            
-            if (leftIndicator != null && rightIndicator != null) {
-                // 确保左侧指示器始终不可见
-                leftIndicator.setVisibility(View.GONE);
-                
-                // 只处理右侧指示器的动画隐藏
-                if (rightIndicator.getVisibility() == View.VISIBLE) {
-                    // 使用硬件加速提高动画性能
-                    rightIndicator.setLayerType(LAYER_TYPE_HARDWARE, null);
-                    
-                    // 应用渐变动画后隐藏
-                    rightIndicator.animate().alpha(0f).setDuration(150)
-                        .withEndAction(() -> {
-                            rightIndicator.setVisibility(View.GONE);
-                            rightIndicator.setLayerType(LAYER_TYPE_NONE, null);
-                        })
-                        .start();
-                }
-            }
-        }
-    }
 
     private void playPageEnterAnimation(View pageView) {
         // 直接设置最终状态，不使用动画
@@ -2015,9 +2193,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         
         // 显示拖拽指示器
         ViewParent parent = getParent();
-        if (parent instanceof ViewGroup) {
-            showDragIndicators((View) parent);
-        }
+
     }
 
     /**
@@ -2105,53 +2281,141 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
         
         // 显示拖拽指示器
         ViewParent parent = getParent();
-        if (parent instanceof ViewGroup) {
-            showDragIndicators((View) parent);
-        }
+
     }
 
     /**
-     * 判断当前页面是否已满（没有空白单元格）
+     * 判断当前页面是否已满（没有足够空白单元格）
+     * @param minEmptyCellsRequired 最低需要的空白单元格数量，默认为1
      * @return 如果页面已满返回true
      */
-    private boolean isPageFull() {
+    private boolean isPageFull(int minEmptyCellsRequired) {
         if (cells == null) return false;
         
+        int emptyCellsCount = 0;
         for (Cell cell : cells) {
-            // 如果有空白单元格，则页面未满
+            // 统计空白单元格数量
             if (cell != null && "empty".equals(cell.getTag())) {
-                return false;
+                emptyCellsCount++;
+                // 如果达到所需最小空白数，则页面不满
+                if (emptyCellsCount >= minEmptyCellsRequired) {
+                    return false;
+                }
             }
         }
         
-        return true;
+        // 如果空白单元格少于所需数量，则页面已满
+        return emptyCellsCount < minEmptyCellsRequired;
     }
     
     /**
-     * 通知可能需要创建新页面
+     * 判断当前页面是否已满（默认要求至少1个空白单元格）
+     * @return 如果页面已满返回true
      */
-    private void notifyPossiblePageCreation() {
-        // 获取当前拖拽的单元格
-        if (currentDragCell != null && cellOverflowListener != null) {
-            // 获取当前页面索引
-            int currentPage = -1;
-            ViewParent parent = getParent();
-            
-            while (parent != null && !(parent.getParent() instanceof ViewPager2)) {
-                parent = parent.getParent();
-            }
-            
-            if (parent != null) {
-                ViewGroup viewPagerContent = (ViewGroup) parent;
-                ViewPager2 viewPager = (ViewPager2) viewPagerContent.getParent();
-                currentPage = viewPager.getCurrentItem();
-            }
-            
-            if (currentPage != -1) {
-                // 通知需要处理溢出
-                cellOverflowListener.onCellOverflow(currentDragCell, currentPage);
-            }
+    private boolean isPageFull() {
+        return isPageFull(1);
+    }
+
+    /**
+     * 处理页面溢出情况，自动创建或切换到新页面
+     * @param overflowCell 溢出的单元格
+     * @return 是否成功处理
+     */
+    private boolean handlePageOverflow(Cell overflowCell) {
+        if (overflowCell == null || cellOverflowListener == null) {
+            return false;
         }
+        
+        // 获取当前页面索引
+        int currentPage = -1;
+        ViewPager2 viewPager = getMainActivityViewPager();
+        
+        if (viewPager != null) {
+            currentPage = viewPager.getCurrentItem();
+            int pageCount = cellOverflowListener.getPageCount();
+            
+            Log.d(TAG, "处理页面溢出：当前页面 " + currentPage + "，总页数 " + pageCount);
+            
+            // 记录当前时间用于节流控制
+            long currentTime = System.currentTimeMillis();
+            
+            // 判断是创建新页面还是使用已存在的下一页
+            int targetPageIndex;
+            if (currentPage < pageCount - 1) {
+                // 如果不是最后一页，直接使用下一页
+                targetPageIndex = currentPage + 1;
+                Log.d(TAG, "页面溢出：使用已存在的下一页 " + targetPageIndex);
+            } else {
+                // 如果是最后一页，创建新页面
+                if (currentTime - lastPageCreationTime > PAGE_CREATION_INTERVAL && 
+                    cellOverflowListener.canCreateNewPage()) {
+                    targetPageIndex = cellOverflowListener.createNewPage();
+                    Log.d(TAG, "页面溢出：创建新页面，索引为 " + targetPageIndex);
+                    
+                    // 更新最后创建页面的时间
+                    lastPageCreationTime = currentTime;
+                } else {
+                    // 如果创建失败或不允许创建，返回false
+                    Log.d(TAG, "页面溢出：无法创建新页面，间隔时间不足或不允许创建");
+                    return false;
+                }
+            }
+            
+            // 标记为跨页面拖拽，并记录源页面
+            String packageName = overflowCell.getTag();
+            if (packageName != null && !packageName.contains(":cross_page")) {
+                overflowCell.setTag(packageName + ":cross_page:" + currentPage + ":" + currentTime);
+                Log.d(TAG, "标记跨页面拖拽: " + overflowCell.getTag());
+                
+                // 保存原始页面，便于拖放失败时返回
+                overflowCell.setExpectColumnIndex(0); // 保存当前页面索引到列索引
+                overflowCell.setExpectRowIndex(currentPage); // 保存当前页面索引到行索引
+            }
+            
+            // 如果当前拖动的视图为隐藏状态，确保它在目标页面可见
+            if (overflowCell.getContentView() != null) {
+                overflowCell.getContentView().setVisibility(View.VISIBLE);
+                overflowCell.getContentView().setAlpha(1.0f);
+            }
+            
+            // 使用监听器通知溢出处理
+            cellOverflowListener.onCellOverflow(overflowCell, currentPage);
+            
+            // 更新页面切换时间
+            lastPageSwitchTime = currentTime;
+            
+            // 平滑切换到目标页面
+            viewPager.setCurrentItem(targetPageIndex, true);
+            
+            // 通知设置目标页面
+            final int finalTargetPageIndex = targetPageIndex;
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                // 确保目标页面已正确设置
+                cellOverflowListener.setupWorkspacePage(finalTargetPageIndex);
+                
+                // 查找目标页面并设置拖拽监听
+                View targetPageView = getViewForPage(viewPager, finalTargetPageIndex);
+                if (targetPageView != null) {
+                    CellLayout targetPageCellLayout = findCellLayoutInViewGroup(targetPageView);
+                    if (targetPageCellLayout != null) {
+                        // 确保目标页面的CellLayout也具有相同的监听器和配置
+                        targetPageCellLayout.setOnCellOverflowListener(cellOverflowListener);
+                        targetPageCellLayout.setRows(rows);
+                        targetPageCellLayout.setColumns(columns);
+                        
+                        // 预留位置
+                        targetPageCellLayout.reservePositionForDragCell(overflowCell);
+                    }
+                }
+                
+                // 通知适配器数据已更改
+                cellOverflowListener.notifyPageAdapterChanged();
+            }, 300);
+            
+            return true;
+        }
+        
+        return false;
     }
 
     /**
@@ -2248,100 +2512,7 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
      * @param view 父视图
      * @param progress 靠近边缘的进度 (0-1)
      */
-    private void updateEdgeIndicatorFeedback(View view, float progress) {
-        // 检查视图是否为null
-        if (view == null) {
-            return;
-        }
-        
-        ViewParent viewParent = view.getParent();
-        if (!(viewParent instanceof ViewGroup)) {
-            return;
-        }
-        
-        ViewGroup parent = (ViewGroup) viewParent;
-        
-        // 查找指示器视图
-        View rightIndicator = parent.findViewById(R.id.drag_indicator_right);
-        if (rightIndicator == null) {
-            return;
-        }
-        
-        // 根据进度调整透明度
-        float alpha = 0.3f + progress * 0.7f;
-        rightIndicator.setAlpha(alpha);
-        
-        // 根据进度调整缩放
-        float scale = 1.0f + progress * 0.3f;
-        rightIndicator.setScaleX(scale);
-        
-        // 调整颜色
-        int color = blendColors(
-                Color.argb(50, 255, 255, 255),  // 初始颜色
-                Color.argb(150, 100, 180, 255), // 最终颜色
-                progress
-        );
-        rightIndicator.setBackgroundColor(color);
-        
-        // 添加脉动动画效果
-        if (progress > 0.7f) {
-            // 进度较高时添加脉动动画
-            addPulseAnimation(rightIndicator);
-        } else {
-            // 取消现有动画
-            rightIndicator.clearAnimation();
-        }
-        
-        // 处理新页面箭头指示器
-        ImageView newPageArrow = parent.findViewById(R.id.new_page_arrow);
-        if (newPageArrow != null) {
-            // 仅当足够靠近边缘时显示箭头
-            if (progress > 0.5f) {
-                if (newPageArrow.getVisibility() != View.VISIBLE) {
-                    newPageArrow.setVisibility(View.VISIBLE);
-                    newPageArrow.setAlpha(0f);
-                }
-                
-                // 根据进度调整箭头透明度
-                float arrowAlpha = (progress - 0.5f) * 2f; // 0.5-1.0进度映射到0-1透明度
-                
-                // 仅当透明度变化明显时更新动画
-                if (Math.abs(newPageArrow.getAlpha() - arrowAlpha) > 0.05f) {
-                    // 应用箭头动画
-                    newPageArrow.animate()
-                            .alpha(arrowAlpha)
-                            .translationX(progress > 0.8f ? -5f : 0f) // 靠近边缘时添加小移动
-                            .setDuration(150)
-                            .start();
-                    
-                    // 当进度很高时，添加箭头的水平抖动动画
-                    if (progress > 0.85f && newPageArrow.getAnimation() == null) {
-                        Animation arrowPulse = new TranslateAnimation(
-                                0, -8, 0, 0);
-                        arrowPulse.setDuration(600);
-                        arrowPulse.setRepeatCount(Animation.INFINITE);
-                        arrowPulse.setRepeatMode(Animation.REVERSE);
-                        arrowPulse.setInterpolator(new AccelerateDecelerateInterpolator());
-                        newPageArrow.startAnimation(arrowPulse);
-                    } else if (progress <= 0.85f) {
-                        // 进度不高时，清除动画
-                        newPageArrow.clearAnimation();
-                    }
-                }
-            } else {
-                // 离边缘太远，隐藏箭头
-                if (newPageArrow.getVisibility() == View.VISIBLE) {
-                    newPageArrow.animate()
-                            .alpha(0f)
-                            .setDuration(150)
-                            .withEndAction(() -> newPageArrow.setVisibility(View.GONE))
-                            .start();
-                    
-                    newPageArrow.clearAnimation();
-                }
-            }
-        }
-    }
+
     
     /**
      * 添加脉动动画
@@ -2440,4 +2611,211 @@ public class CellLayout extends ViewGroup implements View.OnDragListener {
             invalidate();
         }
     }
+
+    /**
+     * 获取MainActivity中的ViewPager2实例
+     * @return ViewPager2实例，如果找不到返回null
+     */
+    private ViewPager2 getMainActivityViewPager() {
+        try {
+            // 从上下文中获取Activity
+            Context context = getContext();
+            if (context instanceof Activity) {
+                Activity activity = (Activity) context;
+                
+                // 尝试通过不同可能的ID查找ViewPager2
+                ViewPager2 viewPager = null;
+                
+                // 尝试查找常见的ViewPager2 ID
+                int[] possibleIds = {
+                    activity.getResources().getIdentifier("viewpager", "id", activity.getPackageName()),
+                    activity.getResources().getIdentifier("view_pager", "id", activity.getPackageName()),
+                    activity.getResources().getIdentifier("main_viewpager", "id", activity.getPackageName()),
+                    activity.getResources().getIdentifier("workspace_pager", "id", activity.getPackageName())
+                };
+                
+                for (int id : possibleIds) {
+                    if (id != 0) {
+                        viewPager = activity.findViewById(id);
+                        if (viewPager != null) {
+                            Log.d(TAG, "通过ID找到ViewPager2: " + id);
+                            // 注册页面变化回调，用于记录页面滑动日志
+                            registerPageChangeCallback(viewPager);
+                            return viewPager;
+                        }
+                    }
+                }
+                
+                // 如果通过ID未找到，回退到原始方法查找ViewPager2
+                ViewParent parent = getParent();
+                while (parent != null && !(parent.getParent() instanceof ViewPager2)) {
+                    parent = parent.getParent();
+                }
+                
+                if (parent != null) {
+                    ViewGroup viewPagerContent = (ViewGroup) parent;
+                    viewPager = (ViewPager2) viewPagerContent.getParent();
+                    // 注册页面变化回调，用于记录页面滑动日志
+                    registerPageChangeCallback(viewPager);
+                    return viewPager;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "获取MainActivity的ViewPager2失败: " + e.getMessage(), e);
+        }
+        
+        return null;
+    }
+    
+    // 页面变化回调对象，防止重复注册
+    private ViewPager2.OnPageChangeCallback pageChangeCallback;
+    
+    /**
+     * 注册ViewPager2页面变化回调，用于记录页面滑动日志
+     * @param viewPager ViewPager2实例
+     */
+    private void registerPageChangeCallback(ViewPager2 viewPager) {
+        if (viewPager == null || pageChangeCallback != null) return;
+        
+        pageChangeCallback = new ViewPager2.OnPageChangeCallback() {
+            @Override
+            public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
+                super.onPageScrolled(position, positionOffset, positionOffsetPixels);
+                Log.d(TAG, "页面滑动中: 位置=" + position + ", 偏移=" + positionOffset);
+            }
+            
+            @Override
+            public void onPageSelected(int position) {
+                super.onPageSelected(position);
+                Log.d(TAG, "页面选择: 位置=" + position);
+            }
+            
+            @Override
+            public void onPageScrollStateChanged(int state) {
+                super.onPageScrollStateChanged(state);
+                String stateString;
+                switch (state) {
+                    case ViewPager2.SCROLL_STATE_IDLE:
+                        stateString = "空闲";
+                        break;
+                    case ViewPager2.SCROLL_STATE_DRAGGING:
+                        stateString = "拖拽中";
+                        break;
+                    case ViewPager2.SCROLL_STATE_SETTLING:
+                        stateString = "settling";
+                        break;
+                    default:
+                        stateString = "未知状态";
+                }
+                Log.d(TAG, "页面滑动状态改变: " + stateString);
+            }
+        };
+        
+        viewPager.registerOnPageChangeCallback(pageChangeCallback);
+        Log.d(TAG, "已注册ViewPager2页面变化回调");
+    }
+    
+    /**
+     * 当CellLayout被回收时，取消注册页面变化回调
+     */
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        
+        // 取消注册页面变化回调
+        if (pageChangeCallback != null) {
+            ViewPager2 viewPager = getMainActivityViewPager();
+            if (viewPager != null) {
+                viewPager.unregisterOnPageChangeCallback(pageChangeCallback);
+                Log.d(TAG, "已取消注册ViewPager2页面变化回调");
+            }
+            pageChangeCallback = null;
+        }
+    }
+
+    /**
+     * 在视图组中递归查找CellLayout
+     * @return 找到的CellLayout，如果没有找到则返回null
+     */
+    private CellLayout findCellLayoutInViewGroup(View view) {
+        // 如果视图本身就是CellLayout，直接返回
+        if (view instanceof CellLayout) {
+            return (CellLayout) view;
+        }
+        
+        // 如果是ViewGroup，遍历其子视图
+        if (view instanceof ViewGroup) {
+            ViewGroup viewGroup = (ViewGroup) view;
+            for (int i = 0; i < viewGroup.getChildCount(); i++) {
+                View child = viewGroup.getChildAt(i);
+                // 递归搜索
+                CellLayout result = findCellLayoutInViewGroup(child);
+                if (result != null) {
+                    return result;
+                }
+            }
+        }
+        
+        // 没有找到
+        return null;
+    }
+    
+    /**
+     * 为拖拽的单元格预留位置
+     * @param dragCell 被拖拽的单元格
+     */
+    public void reservePositionForDragCell(Cell dragCell) {
+        if (dragCell == null || cells == null || cells.isEmpty()) {
+            return;
+        }
+        
+        // 查找第一个空白单元格位置
+        int emptyIndex = -1;
+        for (int i = 0; i < cells.size(); i++) {
+            if (cells.get(i).getTag().equals("empty")) {
+                emptyIndex = i;
+                break;
+            }
+        }
+        
+        if (emptyIndex != -1) {
+            // 找到空位，预留位置
+            Log.d(TAG, "为拖拽的单元格预留位置，索引: " + emptyIndex);
+            
+            // 设置高亮预留区域
+            int reserveRow = emptyIndex / columns;
+            int reserveColumn = emptyIndex % columns;
+            
+            // 设置高亮区域
+            highLightRow = reserveRow;
+            highLightColumn = reserveColumn;
+            highLightValid = true;
+            
+            // 启用高亮动画
+            targetHighlightAlpha = 1.0f;
+            highlightAlpha = 0.3f;
+            lastHighlightUpdateTime = System.currentTimeMillis();
+            
+            // 强制重绘
+            invalidate();
+            
+            // 延迟取消高亮
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                fadeOutHighlight();
+            }, 1500);
+        }
+    }
+
+
+    // 检查是否处于拖拽状态
+    public static boolean isInDragging() {
+        return isInDragging;
+    }
+
+    // 设置拖拽状态
+    public static void setDraggingState(boolean dragging) {
+        isInDragging = dragging;
+        Log.d("CellLayout", "设置全局拖拽状态: " + dragging);
+    }
+
 }

@@ -1,34 +1,76 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.cardview.widget.CardView
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/screensaver_card"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_margin="8dp"
     app:cardCornerRadius="8dp"
-    app:cardElevation="4dp"
-    android:foreground="?android:attr/selectableItemBackground">
+    app:cardElevation="4dp">
 
-    <LinearLayout
+    <RelativeLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="16dp">
+        android:layout_height="wrap_content">
 
         <ImageView
-            android:id="@+id/screensaver_icon"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:contentDescription="屏保图标" />
+            android:id="@+id/screensaver_image"
+            android:layout_width="match_parent"
+            android:layout_height="150dp"
+            android:scaleType="centerCrop"
+            android:contentDescription="屏保图像" />
 
         <TextView
             android:id="@+id/screensaver_name"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_vertical"
-            android:layout_marginStart="16dp"
+            android:layout_below="@id/screensaver_image"
+            android:padding="8dp"
             android:textSize="16sp"
-            android:textColor="#FFFFFF" />
-    </LinearLayout>
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:background="#80000000" />
+
+        <!-- 视频标识 -->
+        <ImageView
+            android:id="@+id/video_indicator"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_alignParentTop="true"
+            android:layout_alignParentEnd="true"
+            android:layout_margin="8dp"
+            android:src="@android:drawable/ic_media_play"
+            android:background="#80000000"
+            android:padding="4dp"
+            android:visibility="gone" />
+
+        <!-- 预览按钮 -->
+        <ImageView
+            android:id="@+id/preview_button"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_alignParentTop="true"
+            android:layout_alignParentStart="true"
+            android:layout_margin="8dp"
+            android:src="@android:drawable/ic_menu_view"
+            android:background="#80000000"
+            android:padding="8dp" />
+
+        <!-- 选中状态指示器 -->
+        <FrameLayout
+            android:id="@+id/check_indicator"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_alignParentEnd="true"
+            android:layout_alignParentBottom="true"
+            android:layout_margin="8dp"
+            android:background="@drawable/circle_background"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="center"
+                android:src="@android:drawable/ic_menu_camera"
+                android:tint="#FFFFFF" />
+        </FrameLayout>
+    </RelativeLayout>
 </androidx.cardview.widget.CardView> 

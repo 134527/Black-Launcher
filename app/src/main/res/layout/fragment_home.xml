@@ -19,11 +19,11 @@
             android:id="@+id/timerText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="20dp"
-            android:layout_marginLeft="16dp"
+            android:layout_marginBottom="30px"
+            android:layout_marginLeft="22px"
             android:text="00:00:00"
             android:textColor="#FFFFFF"
-            android:textSize="90sp"
+            android:textSize="150px"
             android:textStyle="bold"
             android:textFontWeight="600"
             android:fontFamily="sans-serif"/>
@@ -35,21 +35,21 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_below="@id/timerText"
-            android:layout_marginLeft="16dp"
-            android:layout_marginBottom="120dp"
+            android:layout_marginLeft="22px"
+            android:layout_marginBottom="230px"
             android:fontFamily="sans-serif"
             android:text="YYYY-MM-DD"
             android:textColor="#FFFFFF"
-            android:textSize="25sp" />
+            android:textSize="55px" />
 
         <ImageButton
             android:id="@+id/searchButton"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
+            android:layout_width="118px"
+            android:layout_height="118px"
             android:layout_alignParentEnd="true"
 
-            android:layout_marginTop="16dp"
-            android:layout_marginEnd="16dp"
+            android:layout_marginTop="22px"
+            android:layout_marginEnd="22px"
             android:src="@drawable/launcher_main_search"
             android:scaleType="fitCenter"
             android:background="?attr/selectableItemBackgroundBorderless"/>
@@ -101,10 +101,10 @@
         android:id="@+id/tvModeCard"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_margin="16dp"
-        app:cardCornerRadius="24dp"
+        android:layout_margin="22px"
+        app:cardCornerRadius="38px"
         app:cardBackgroundColor="@android:color/transparent"
-        app:cardElevation="0dp"
+        app:cardElevation="0px"
         app:layout_constraintStart_toStartOf="@+id/guidelineStart"
         app:layout_constraintEnd_toStartOf="@id/guidelineLeft"
         app:layout_constraintTop_toTopOf="@id/guidelineBottom"
@@ -115,7 +115,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             app:blurOverlayColor="#33FFFFFF">
-            
+
             <RelativeLayout
                 android:layout_width="match_parent"
                 android:layout_height="match_parent">
@@ -124,24 +124,25 @@
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:src="@drawable/launcher_main_pattern"
-                    android:scaleType="centerCrop"/>
+                    android:scaleType="fitXY"
+                    android:adjustViewBounds="true"/>
 
                 <FrameLayout
                     android:layout_width="match_parent"
-                    android:layout_height="125dp"
+                    android:layout_height="240px"
                     android:layout_alignParentBottom="true"
                     android:layout_centerInParent="true"
-                    android:layout_margin="16dp"
+                    android:layout_margin="22px"
                     android:background="@drawable/blur_text_backgroud">
 
                     <net.center.blurview.ShapeBlurView
                         android:id="@+id/tv_mode_blur_view"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
-                        app:blur_radius="25dp"
+                        app:blur_radius="40px"
                         app:blur_down_sample="0.5"
                         app:blur_overlay_color="#26FFFFFF"
-                        app:blur_corner_radius="24dp"
+                        app:blur_corner_radius="38px"
                         app:blur_mode="rectangle"/>
 
                     <LinearLayout
@@ -156,15 +157,15 @@
                             android:layout_height="wrap_content"
                             android:text="TV模式"
                             android:textColor="@android:color/white"
-                            android:textSize="42sp"
+                            android:textSize="64px"
                             android:textStyle="bold"/>
 
                         <ImageView
-                            android:layout_width="40dp"
-                            android:layout_height="40dp"
+                            android:layout_width="70px"
+                            android:layout_height="70px"
                             android:src="@drawable/tag_tv_model_icon"
                             android:scaleType="fitCenter"
-                            android:layout_marginStart="16dp"/>
+                            android:layout_marginStart="22px"/>
                     </LinearLayout>
                 </FrameLayout>
             </RelativeLayout>
@@ -173,10 +174,10 @@
 
     <!-- 中间列布局 -->
     <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="0dp"
+        android:layout_width="0px"
+        android:layout_height="0px"
         android:orientation="vertical"
-        android:layout_margin="8dp"
+        android:layout_margin="8px"
         app:layout_constraintStart_toEndOf="@id/guidelineLeft"
         app:layout_constraintEnd_toStartOf="@id/guidelineCenter"
         app:layout_constraintTop_toTopOf="@id/guidelineBottom"
@@ -195,11 +196,11 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_marginLeft="16dp"
-            android:layout_marginRight="16dp"
-            android:layout_marginBottom="16dp"
-            android:layout_marginTop="8dp"
-            app:cardCornerRadius="24dp"
+            android:layout_marginLeft="22px"
+            android:layout_marginRight="22px"
+            android:layout_marginBottom="22px"
+            android:layout_marginTop="8px"
+            app:cardCornerRadius="38px"
             app:cardBackgroundColor="#FFA500">
 
             <ImageView
@@ -211,7 +212,7 @@
 
             <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="100dp"
+                android:layout_height="150px"
                 android:layout_gravity="bottom"
                 >
 
@@ -219,7 +220,7 @@
                     android:id="@+id/theme_blur_view"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    app:blur_radius="20sp"
+                    app:blur_radius="30px"
                     app:blur_down_sample="0.5"
                     app:blur_overlay_color="#26FFFFFF"
                     app:blur_mode="rectangle"/>
@@ -231,18 +232,18 @@
                     android:gravity="center"
                     android:layout_gravity="center">
                     <ImageView
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
+                        android:layout_width="70px"
+                        android:layout_height="70px"
                         android:src="@drawable/tag_tv_theme_icon"
                         android:scaleType="fitCenter"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginEnd="16dp"/>
+                        android:layout_marginStart="22px"
+                        android:layout_marginEnd="22px"/>
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="桌面主题"
                         android:textColor="@android:color/white"
-                        android:textSize="32sp"
+                        android:textSize="52px"
                         android:textStyle="bold"/>
 
 
@@ -256,22 +257,23 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_marginLeft="16dp"
-            android:layout_marginRight="16dp"
-            android:layout_marginBottom="16dp"
-            android:layout_marginTop="8dp"
-            app:cardCornerRadius="24dp"
+            android:layout_marginLeft="22px"
+            android:layout_marginRight="22px"
+            android:layout_marginBottom="22px"
+            android:layout_marginTop="8px"
+            app:cardCornerRadius="38px"
             app:cardBackgroundColor="#0066CC">
 
             <ImageView
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:src="@drawable/launcher_art_btn"
-                android:scaleType="centerCrop"/>
+                android:scaleType="centerCrop"
+                />
 
             <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="100dp"
+                android:layout_height="150px"
                 android:layout_gravity="bottom"
                 >
 
@@ -279,7 +281,7 @@
                     android:id="@+id/screensaver_blur_view"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    app:blur_radius="20sp"
+                    app:blur_radius="30px"
                     app:blur_down_sample="0.5"
                     app:blur_overlay_color="#26FFFFFF"
                     app:blur_mode="rectangle"/>
@@ -291,18 +293,18 @@
                     android:gravity="center"
                     android:layout_gravity="center">
                     <ImageView
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
+                        android:layout_width="70px"
+                        android:layout_height="70px"
                         android:src="@drawable/tag_art_icon"
                         android:scaleType="fitCenter"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginEnd="16dp"/>
+                        android:layout_marginStart="22px"
+                        android:layout_marginEnd="22px"/>
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="艺术屏保"
                         android:textColor="@android:color/white"
-                        android:textSize="32sp"
+                        android:textSize="52px"
                         android:textStyle="bold"/>
 
 
@@ -317,20 +319,20 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="0.7"
-            android:layout_marginLeft="16dp"
-            android:layout_marginRight="16dp"
-            android:layout_marginBottom="0dp"
-            android:layout_marginTop="16dp"
-            app:cardCornerRadius="24dp"
+            android:layout_marginLeft="22px"
+            android:layout_marginRight="22px"
+            android:layout_marginBottom="0px"
+            android:layout_marginTop="22px"
+            app:cardCornerRadius="38px"
             app:cardBackgroundColor="@android:color/transparent"
             app:cardElevation="0dp">
-            
+
             <eightbitlab.com.blurview.BlurView
                 android:id="@+id/whiteboard_blur_view"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 app:blurOverlayColor="#33FFFFFF">
-                
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
@@ -339,11 +341,11 @@
                     <!-- 左侧图片 -->
                     <ImageView
                         android:layout_width="0dp"
-                        android:layout_weight="0.5"
+                        android:layout_weight="0.4"
                         android:layout_height="match_parent"
                         android:src="@drawable/launcher_drawing_left_icon"
                         android:scaleType="fitCenter"
-                        android:layout_marginLeft="100dp"/>
+                        android:layout_marginLeft="100px"/>
 
                     <!-- 中间文字 -->
                     <TextView
@@ -352,7 +354,7 @@
                         android:layout_weight="1"
                         android:text="电子白板"
                         android:textColor="@android:color/white"
-                        android:textSize="36sp"
+                        android:textSize="52px"
                         android:layout_gravity="center"
                         android:gravity="center"/>
 
@@ -362,8 +364,8 @@
                         android:layout_weight="2"
                         android:layout_height="match_parent"
                         android:src="@drawable/launcher_drawing_bg"
-                        android:layout_marginTop="40dp"
-                        android:layout_marginRight="40dp"/>
+                        android:layout_marginTop="70px"
+                        android:layout_marginRight="70px"/>
                 </LinearLayout>
             </eightbitlab.com.blurview.BlurView>
         </androidx.cardview.widget.CardView>
@@ -374,7 +376,7 @@
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:orientation="vertical"
-        android:layout_margin="8dp"
+        android:layout_margin="8px"
         app:layout_constraintStart_toEndOf="@id/guidelineCenter"
         app:layout_constraintEnd_toEndOf="@+id/guidelineEnd"
         app:layout_constraintTop_toTopOf="@id/guidelineBottom"
@@ -384,8 +386,8 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="8dp"
-        android:layout_marginLeft="16dp"
+        android:layout_marginTop="16px"
+        android:layout_marginLeft="22px"
 
 
         android:orientation="horizontal">
@@ -395,7 +397,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            app:cardCornerRadius="24dp"
+            app:cardCornerRadius="38px"
             app:cardBackgroundColor="@android:color/transparent"
             app:cardElevation="0dp">
 
@@ -404,23 +406,25 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 app:blurOverlayColor="#33FFFFFF">
-                
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:orientation="vertical"
-                    android:padding="64dp">
+                    >
 
                     <LinearLayout
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:layout_marginTop="76px"
+                        android:layout_marginLeft="76px">
 
                         <ImageView
-                            android:layout_width="32dp"
-                            android:layout_height="32dp"
-                            android:layout_marginEnd="8dp"
+                            android:layout_width="54px"
+                            android:layout_height="54px"
+                            android:layout_marginEnd="6px"
                             android:scaleType="fitCenter"
                             android:src="@drawable/tag_tool_icon" />
 
@@ -429,23 +433,25 @@
                             android:layout_height="wrap_content"
                             android:text="基础工具"
                             android:textColor="@android:color/white"
-                            android:textSize="32sp"
-                            android:layout_marginStart="16dp"
+                            android:textSize="52px"
+                            android:layout_marginStart="22px"
                             android:textStyle="bold"
                             />
 
                     </LinearLayout>
-
                     <LinearLayout
                         android:id="@+id/basicToolsContainer"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         android:orientation="horizontal"
-                        android:gravity="center_vertical"
+                        android:paddingTop="82px"
 
-                        android:layout_marginTop="36dp"
+
+
                         />
+
                 </LinearLayout>
+
             </eightbitlab.com.blurview.BlurView>
         </androidx.cardview.widget.CardView>
     </LinearLayout>
@@ -454,8 +460,8 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="0.8"
-            android:layout_marginLeft="8dp"
-            android:layout_marginTop="24dp"
+            android:layout_marginLeft="8px"
+            android:layout_marginTop="38px"
 
 
 
@@ -474,17 +480,17 @@
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"
-                    android:layout_margin="8dp"
-                    app:cardCornerRadius="24dp"
+                    android:layout_margin="8px"
+                    app:cardCornerRadius="38px"
                     app:cardElevation="0dp"
                     app:cardBackgroundColor="@android:color/transparent">
-                    
+
                     <eightbitlab.com.blurview.BlurView
                         android:id="@+id/settings_card_blur_view"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         app:blurOverlayColor="#33FFFFFF">
-                        
+
                         <FrameLayout
                             android:layout_width="match_parent"
                             android:layout_height="match_parent">
@@ -499,10 +505,10 @@
                                     android:layout_height="match_parent"
                                     android:columnCount="3"
                                     android:rowCount="2"
-                                    android:padding="9dp">
+                                    android:padding="14px">
                                 </GridLayout>
                             </ScrollView>
-                            
+
                             <!-- 添加透明遮罩层用于处理点击事件 -->
                             <com.msk.blacklauncher.view.CardTouchInterceptor
                                 android:id="@+id/settingsCardOverlay"
@@ -520,8 +526,8 @@
                     android:layout_height="wrap_content"
                     android:text="基础设置"
                     android:textColor="@android:color/white"
-                    android:textSize="30sp"
-                    android:layout_marginTop="16dp"/>
+                    android:textSize="50px"
+                    android:layout_marginTop="22px"/>
             </LinearLayout>
 
             <!-- 办公学习卡片 -->
@@ -537,17 +543,17 @@
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"
-                    android:layout_margin="8dp"
-                    app:cardCornerRadius="24dp"
+                    android:layout_margin="8px"
+                    app:cardCornerRadius="38px"
                     app:cardElevation="0dp"
                     app:cardBackgroundColor="@android:color/transparent">
-                    
+
                     <eightbitlab.com.blurview.BlurView
                         android:id="@+id/office_card_blur_view"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         app:blurOverlayColor="#33FFFFFF">
-                        
+
                         <FrameLayout
                             android:layout_width="match_parent"
                             android:layout_height="match_parent">
@@ -562,12 +568,12 @@
                                     android:layout_height="match_parent"
                                     android:columnCount="3"
                                     android:rowCount="2"
-                                    android:padding="9dp">
+                                    android:padding="14px">
 
                                     <!-- 9个应用图标位置 -->
                                 </GridLayout>
                             </ScrollView>
-                            
+
                             <com.msk.blacklauncher.view.CardTouchInterceptor
                                 android:id="@+id/officeCardOverlay"
                                 android:layout_width="match_parent"
@@ -584,8 +590,8 @@
                     android:layout_height="wrap_content"
                     android:text="办公学习"
                     android:textColor="@android:color/white"
-                    android:textSize="30sp"
-                    android:layout_marginTop="16dp"/>
+                    android:textSize="50px"
+                    android:layout_marginTop="22px"/>
             </LinearLayout>
 
             <!-- 应用宝卡片 -->
@@ -601,17 +607,17 @@
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"
-                    android:layout_margin="8dp"
-                    app:cardCornerRadius="24dp"
+                    android:layout_margin="8px"
+                    app:cardCornerRadius="38px"
                     app:cardElevation="0dp"
                     app:cardBackgroundColor="@android:color/transparent">
-                    
+
                     <eightbitlab.com.blurview.BlurView
                         android:id="@+id/apps_card_blur_view"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         app:blurOverlayColor="#33FFFFFF">
-                        
+
                         <FrameLayout
                             android:layout_width="match_parent"
                             android:layout_height="match_parent">
@@ -626,10 +632,10 @@
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
                                     android:columnCount="3"
-                                    android:padding="9dp">
+                                    android:padding="14px">
                                 </GridLayout>
                             </ScrollView>
-                            
+
                             <com.msk.blacklauncher.view.CardTouchInterceptor
                                 android:id="@+id/appsCardOverlay"
                                 android:layout_width="match_parent"
@@ -646,8 +652,8 @@
                     android:layout_height="wrap_content"
                     android:text="应用宝"
                     android:textColor="@android:color/white"
-                    android:textSize="30sp"
-                    android:layout_marginTop="16dp"/>
+                    android:textSize="50px"
+                    android:layout_marginTop="22px"/>
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
@@ -663,7 +669,7 @@
         app:layout_constraintTop_toTopOf="@id/guidelineTop"
         app:dotRadius="6dp"
         app:dotSpacing="8dp"
-        app:dotMarginStart="16dp"
+        app:dotMarginStart="22px"
         app:selectedColor="@android:color/white"
         app:unselectedColor="#50FFFFFF" />
 </androidx.constraintlayout.widget.ConstraintLayout>

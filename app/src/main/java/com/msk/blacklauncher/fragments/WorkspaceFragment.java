@@ -36,6 +36,8 @@ import android.view.animation.OvershootInterpolator;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.content.res.Configuration;
+import android.view.ViewConfiguration;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -56,6 +58,8 @@ import com.msk.blacklauncher.view.CellLayout;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 public class WorkspaceFragment extends Fragment {
 
@@ -136,8 +140,12 @@ public class WorkspaceFragment extends Fragment {
         if (appChangeReceiver != null) {
             requireActivity().unregisterReceiver(appChangeReceiver);
         }
+        
+        // 确保重置所有拖拽状态
+        CellLayout.setDraggingState(false);
     }
 
+    // 修改BroadcastReceiver以确保立即刷新
     private BroadcastReceiver appChangeReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -148,6 +156,7 @@ public class WorkspaceFragment extends Fragment {
             if (data == null) return;
 
             String packageName = data.getSchemeSpecificPart();
+            Log.d(TAG, "检测到应用变化: " + action + ", 包名: " + packageName);
 
             if (Intent.ACTION_PACKAGE_ADDED.equals(action) ||
                     Intent.ACTION_PACKAGE_REPLACED.equals(action)) {
@@ -157,16 +166,88 @@ public class WorkspaceFragment extends Fragment {
                         Drawable icon = appInfo.loadIcon(packageManager);
                         String label = appInfo.loadLabel(packageManager).toString();
                         AppModel newApp = new AppModel(label, icon, packageName);
-                        addAppToWorkspace(newApp);
+                        
+                        // 在UI线程上添加应用
+                        new Handler(Looper.getMainLooper()).post(() -> {
+                            addAppToWorkspace(newApp);
+                            // 立即保存应用位置
+                            saveAppPositions();
+                            // 强制更新当前页面
+                            refreshCurrentPage();
+                        });
                     }
                 } catch (PackageManager.NameNotFoundException e) {
-                    Log.e("WorkspaceFragment", "找不到包: " + packageName, e);
+                    Log.e(TAG, "找不到包: " + packageName, e);
                 }
             } else if (Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
-                removeAppFromWorkspace(packageName);
+                // 在UI线程上移除应用
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    removeAppFromWorkspace(packageName);
+                    // 立即保存应用位置
+                    saveAppPositions();
+                    // 强制更新当前页面
+                    refreshCurrentPage();
+                });
             }
         }
     };
+
+    /**
+     * 刷新当前显示的页面
+     */
+    private void refreshCurrentPage() {
+        if (workspacePager != null && workspaceCells != null && !workspaceCells.isEmpty()) {
+            int currentPage = workspacePager.getCurrentItem();
+            if (currentPage >= 0 && currentPage < workspaceCells.size()) {
+                Log.d(TAG, "刷新当前页面: " + currentPage);
+                setupWorkspacePage(currentPage);
+                
+                // 触发ViewPager2适配器更新
+                if (workspacePager.getAdapter() != null) {
+                    workspacePager.getAdapter().notifyItemChanged(currentPage);
+                }
+            }
+        }
+    }
+
+    /**
+     * 保存应用位置的优化版本
+     */
+    private void saveAppPositions() {
+        try {
+            if (!isAdded() || requireActivity() == null) {
+                Log.e(TAG, "片段未附加到活动，无法保存应用位置");
+                return;
+            }
+
+            List<SerializableAppPosition> appPositions = new ArrayList<>();
+
+            for (int pageIndex = 0; pageIndex < workspaceCells.size(); pageIndex++) {
+                List<CellLayout.Cell> pageCells = workspaceCells.get(pageIndex);
+                for (int positionInPage = 0; positionInPage < pageCells.size(); positionInPage++) {
+                    CellLayout.Cell cell = pageCells.get(positionInPage);
+                    if (cell != null && !cell.getTag().equals("empty")) {
+                        appPositions.add(new SerializableAppPosition(
+                                cell.getTag(),
+                                pageIndex,
+                                positionInPage
+                        ));
+                    }
+                }
+            }
+
+            SharedPreferences prefs = requireActivity().getSharedPreferences(
+                    PREFS_NAME, Context.MODE_PRIVATE);
+            Gson gson = new Gson();
+            String json = gson.toJson(appPositions);
+
+            // 使用commit()而非apply()确保立即写入
+            prefs.edit().putString(APP_POSITIONS_KEY, json).commit();
+            Log.d(TAG, "应用位置已保存，共 " + appPositions.size() + " 个应用");
+        } catch (Exception e) {
+            Log.e(TAG, "保存应用位置时出错", e);
+        }
+    }
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -257,6 +338,14 @@ public class WorkspaceFragment extends Fragment {
                 // 通知适配器更新
                 if (workspacePager.getAdapter() != null) {
                     workspacePager.getAdapter().notifyItemInserted(workspaceCells.size() - 1);
+                    
+                    // 添加额外的通知，确保适配器完全刷新
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        if (isAdded() && !isDetached() && workspacePager.getAdapter() != null) {
+                            // 通知数据集更改确保ViewPager2正确更新
+                            notifyPageAdapterChanged();
+                        }
+                    }, 50);
                 }
                 
                 // 返回新页面的索引
@@ -332,6 +421,34 @@ public class WorkspaceFragment extends Fragment {
                 }
                 return null;
             }
+
+            public void notifyPageAdapterChanged() {
+                // 通知ViewPager2数据已更新
+                if (workspacePager != null && workspacePager.getAdapter() != null) {
+                    workspacePager.getAdapter().notifyDataSetChanged();
+                    Log.d(TAG, "已通知ViewPager2适配器数据已更改");
+                }
+            }
+
+            @Override
+            public boolean requestReturnToPage(CellLayout.Cell cellToMove, int targetPageIndex) {
+return true;
+            }
+
+            @Override
+            public void notifyPageDataChanged(int pageIndex) {
+
+            }
+
+
+            public void notifyIconTemporarilyRemovedFromPage(String packageName, int pageIndex) {
+
+            }
+
+           
+            public void removeAppFromPage(String packageName, int pageIndex) {
+
+            }
         }));
 
         // 手动设置页面指示器 - 总共2页，当前是第1页（索引从0开始）
@@ -384,6 +501,38 @@ public class WorkspaceFragment extends Fragment {
         
         // 确保视图创建后进入全屏模式
         hideSystemUI();
+        
+        // 添加ViewPager2页面滑动监听器，确保页面正确显示
+        workspacePager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+            @Override
+            public void onPageSelected(int position) {
+                // 当页面选中时，确保页面内容已正确设置
+                if (position >= 0 && position < workspaceCells.size()) {
+                    // 延迟设置页面，确保页面已完全加载
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        if (isAdded() && !isDetached()) {
+                            setupWorkspacePage(position);
+                            Log.d(TAG, "选中页面 " + position + " 并设置内容");
+                        }
+                    }, 100);
+                }
+                
+                // 更新页面指示器
+                updatePageIndicator(position);
+            }
+        });
+        
+        // 增加定期保存应用位置的机制
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (isAdded() && !isDetached()) {
+                    saveAppPositions();
+                    // 每30秒运行一次
+                    new Handler(Looper.getMainLooper()).postDelayed(this, 30000);
+                }
+            }
+        }, 30000); // 30秒后开始第一次保存
     }
 
     @Override
@@ -429,6 +578,23 @@ public class WorkspaceFragment extends Fragment {
         super.onStop();
         // 移除待处理的隐藏UI回调
         uiHandler.removeCallbacks(hideSystemUIRunnable);
+        // 在Fragment不可见时保存应用位置
+        saveAppPositions();
+    }
+
+    /**
+     * 通知页面适配器数据已更改
+     * 用于外部组件调用，以刷新ViewPager2
+     */
+    public void notifyPageAdapterChanged() {
+        if (workspacePager != null && workspacePager.getAdapter() != null) {
+            // 通知适配器数据已更改
+            workspacePager.getAdapter().notifyDataSetChanged();
+            Log.d(TAG, "已通知ViewPager2适配器数据已更改(外部调用)");
+            
+            // 确保页面指示器也更新
+            initPageIndicator();
+        }
     }
 
     private void addNewPage() {
@@ -564,8 +730,8 @@ public class WorkspaceFragment extends Fragment {
                         // 创建单元格
                         CellLayout.Cell crossPageCell = new CellLayout.Cell(packageName, contentView);
                         
-                        // 设置为跨页拖拽
-                        crossPageCell.setTag(packageName + ":cross_page:" + pageIndex);
+                        // 设置为跨页拖拽，添加时间戳避免解析错误
+                        crossPageCell.setTag(packageName + ":cross_page:" + pageIndex + ":" + System.currentTimeMillis());
                         
                         // 放置到目标页面
                         workspaceCells.get(targetPage).set(targetPos, crossPageCell);
@@ -696,17 +862,22 @@ public class WorkspaceFragment extends Fragment {
             return;
         }
 
+        // 使用ViewPager2关联页面指示器，自动处理页数变化
         pageIndicator.setupWithViewPager(workspacePager);
+        Log.d(TAG, "PageIndicator已关联到WorkspacePager");
     }
 
     /**
      * 更新页面指示器状态
+     * 注意：当使用setupWithViewPager时，此方法不再需要调用，因为PageIndicator会自动更新
+     * 但为了兼容性保留此方法
      * @param currentPage 当前页面位置
      */
     public void updatePageIndicator(int currentPage) {
         if (pageIndicator != null) {
-            Log.d(TAG, "更新页面指示器位置: " + currentPage);
+            // 由于已使用setupWithViewPager，此方法通常不需要手动调用
             pageIndicator.setCurrentPage(currentPage);
+            Log.d(TAG, "手动更新页面指示器位置: " + currentPage);
         }
     }
 
@@ -820,6 +991,9 @@ public class WorkspaceFragment extends Fragment {
         return apps;
     }
 
+    /**
+     * 优化应用位置加载逻辑
+     */
     private List<List<CellLayout.Cell>> loadAppPositions() {
         List<List<CellLayout.Cell>> result = new ArrayList<>();
 
@@ -832,43 +1006,74 @@ public class WorkspaceFragment extends Fragment {
                 Type type = new TypeToken<List<SerializableAppPosition>>(){}.getType();
                 List<SerializableAppPosition> savedPositions = gson.fromJson(json, type);
 
-                int maxPages = 5;
-                int estimatedPages = Math.min(maxPages, Math.max(1, getMaxPageIndex(savedPositions) + 1));
+                // 检查已保存位置的有效性
+                if (savedPositions != null && !savedPositions.isEmpty()) {
+                    int maxPages = 5;
+                    int estimatedPages = Math.min(maxPages, Math.max(1, getMaxPageIndex(savedPositions) + 1));
+                    
+                    // 初始化空页面
+                    result = initializeEmptyWorkspace(estimatedPages);
+                    
+                    // 创建应用信息缓存以提高性能
+                    Map<String, AppModel> appCache = new HashMap<>();
+                    
+                    // 应用放置计数器
+                    int appsPlaced = 0;
+                    int appsSkipped = 0;
 
-                result = initializeEmptyWorkspace(estimatedPages);
+                    // 按页面和位置顺序处理保存的位置
+                    for (SerializableAppPosition position : savedPositions) {
+                        if (position.getPageIndex() >= maxPages) {
+                            continue;
+                        }
 
-                for (SerializableAppPosition position : savedPositions) {
-                    if (position.getPageIndex() >= maxPages) {
-                        continue;
-                    }
+                        try {
+                            String packageName = position.getPackageName();
+                            
+                            // 检查缓存中是否已有此应用
+                            AppModel appModel = appCache.get(packageName);
+                            
+                            // 如果缓存中没有，尝试从系统获取
+                            if (appModel == null) {
+                                try {
+                                    ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
+                                    appModel = new AppModel(
+                                            appInfo.loadLabel(packageManager).toString(),
+                                            appInfo.loadIcon(packageManager),
+                                            packageName
+                                    );
+                                    
+                                    // 添加到缓存
+                                    appCache.put(packageName, appModel);
+                                } catch (PackageManager.NameNotFoundException e) {
+                                    Log.w(TAG, "应用不存在: " + packageName);
+                                    appsSkipped++;
+                                    continue;
+                                }
+                            }
+                            
+                            // 创建应用视图
+                            View appView = createAppIconView(appModel);
+                            CellLayout.Cell cell = new CellLayout.Cell(packageName, appView);
 
-                    while (result.size() <= position.getPageIndex() && result.size() < maxPages) {
-                        result.add(createEmptyPage());
-                    }
-
-                    try {
-                        String packageName = position.getPackageName();
-                        ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
-
-                        View appView = createAppIconView(new AppModel(
-                                appInfo.loadLabel(packageManager).toString(),
-                                appInfo.loadIcon(packageManager),
-                                packageName
-                        ));
-
-                        CellLayout.Cell cell = new CellLayout.Cell(packageName, appView);
-
-                        if (position.getPageIndex() < result.size()) {
+                            // 确保有足够的页面
+                            while (result.size() <= position.getPageIndex()) {
+                                result.add(createEmptyPage());
+                            }
+                            
+                            // 放置应用到指定位置
                             List<CellLayout.Cell> page = result.get(position.getPageIndex());
                             if (position.getPositionInPage() < page.size()) {
                                 page.set(position.getPositionInPage(), cell);
+                                appsPlaced++;
                             }
+                        } catch (Exception e) {
+                            Log.e(TAG, "加载应用时出错: " + position.getPackageName(), e);
+                            appsSkipped++;
                         }
-                    } catch (PackageManager.NameNotFoundException e) {
-                        Log.w(TAG, "应用不存在: " + position.getPackageName());
-                    } catch (Exception e) {
-                        Log.e(TAG, "加载应用时出错: " + position.getPackageName(), e);
                     }
+                    
+                    Log.d(TAG, "应用加载完成: 成功=" + appsPlaced + ", 跳过=" + appsSkipped);
                 }
             }
         } catch (Exception e) {
@@ -915,41 +1120,7 @@ public class WorkspaceFragment extends Fragment {
         return page;
     }
 
-    private void saveAppPositions() {
-        try {
-            if (!isAdded() || requireActivity() == null) {
-                Log.e(TAG, "片段未附加到活动，无法保存应用位置");
-                return;
-            }
-
-            List<SerializableAppPosition> appPositions = new ArrayList<>();
-
-            for (int pageIndex = 0; pageIndex < workspaceCells.size(); pageIndex++) {
-                List<CellLayout.Cell> pageCells = workspaceCells.get(pageIndex);
-                for (int positionInPage = 0; positionInPage < pageCells.size(); positionInPage++) {
-                    CellLayout.Cell cell = pageCells.get(positionInPage);
-                    if (cell != null && !cell.getTag().equals("empty")) {
-                        appPositions.add(new SerializableAppPosition(
-                                cell.getTag(),
-                                pageIndex,
-                                positionInPage
-                        ));
-                    }
-                }
-            }
-
-            SharedPreferences prefs = requireActivity().getSharedPreferences(
-                    PREFS_NAME, Context.MODE_PRIVATE);
-            Gson gson = new Gson();
-            String json = gson.toJson(appPositions);
-
-            prefs.edit().putString(APP_POSITIONS_KEY, json).apply();
-            Log.d(TAG, "应用位置已保存，共 " + appPositions.size() + " 个应用");
-        } catch (Exception e) {
-            Log.e(TAG, "保存应用位置时出错", e);
-        }
-    }
-
+    // 3. 优化长按触发拖拽的逻辑
     private View createAppIconView(AppModel app) {
         if (app == null) {
             Log.e(TAG, "应用模型为空，无法创建图标");
@@ -982,7 +1153,22 @@ public class WorkspaceFragment extends Fragment {
         labelView.setTextSize(20);
         labelView.setPadding(0,16,0,0);
         labelView.setGravity(Gravity.CENTER);
-        labelView.setMaxLines(2);
+        
+        // 检查屏幕方向
+        int orientation = getResources().getConfiguration().orientation;
+        if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+            // 竖屏模式 - 使用单行和省略号
+            labelView.setMaxLines(1);
+            labelView.setEllipsize(TextUtils.TruncateAt.END);
+            labelView.setSingleLine(true);
+            Log.d(TAG, "竖屏模式: 应用单行文本显示和省略号");
+        } else {
+            // 横屏模式 - 可以显示多行
+            labelView.setMaxLines(2);
+            labelView.setSingleLine(false);
+            labelView.setEllipsize(null);
+            Log.d(TAG, "横屏模式: 应用多行文本显示");
+        }
  
         // 设置应用名称
         labelView.setText(app.getAppName());
@@ -990,9 +1176,92 @@ public class WorkspaceFragment extends Fragment {
         // 为视图设置标签数据，方便后续识别
         appView.setTag(app);
 
-        // 设置点击监听器
+        // 设置长按监听器以支持拖拽
+        appView.setOnLongClickListener(null); // 移除原有长按监听器
+
+        // 设置极短的拖拽触发时间 - 从180ms减少到80ms
+        final int ULTRA_SHORT_TOUCH_TIMEOUT = 80;
+        
+        // 使用自定义触摸监听代替长按监听
+        appView.setOnTouchListener(new View.OnTouchListener() {
+            private long pressStartTime;
+            private float startX, startY;
+            private boolean longPressTriggered = false;
+            private boolean isDraggingStarted = false;
+            private final Handler handler = new Handler(Looper.getMainLooper());
+            
+            private final Runnable dragStartRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    if (longPressTriggered || isDraggingStarted) return;
+                    
+                    // 检查是否为空单元格或已在拖拽中
+                    if (app.getPackageName().equals("empty") || CellLayout.isInDragging()) {
+                        return;
+                    }
+                    
+                    longPressTriggered = true;
+                    isDraggingStarted = true;
+                    
+                    // 触发振动反馈
+                    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, VIBRATION_DRAG_START);
+                    
+                    // 开始拖拽操作
+                    startDragOperation(appView, app.getPackageName());
+                }
+            };
+            
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        // 记录按下的位置和时间
+                        startX = event.getX();
+                        startY = event.getY();
+                        pressStartTime = System.currentTimeMillis();
+                        longPressTriggered = false;
+                        isDraggingStarted = false;
+                        
+                        // 极短延迟后检测是否应该拖拽 - 几乎立即触发
+                        handler.postDelayed(dragStartRunnable, ULTRA_SHORT_TOUCH_TIMEOUT);
+                        return true; // 消费事件，阻止点击事件传递
+                        
+                    case MotionEvent.ACTION_MOVE:
+                        // 如果移动距离超过阈值，可以立即启动拖拽
+                        float moveX = Math.abs(event.getX() - startX);
+                        float moveY = Math.abs(event.getY() - startY);
+                        
+                        // 如果已经开始拖动超过一定距离，立即开始拖拽而不等待
+                        if (!isDraggingStarted && (moveX > 10 || moveY > 10) && 
+                            System.currentTimeMillis() - pressStartTime > 30) {
+                            handler.removeCallbacks(dragStartRunnable);
+                            dragStartRunnable.run(); // 立即启动拖拽
+                        }
+                        return true;
+                        
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        // 取消拖拽开始计时
+                        handler.removeCallbacks(dragStartRunnable);
+                        
+                        // 如果未触发拖拽，且点击时间短，则视为点击
+                        if (!longPressTriggered && 
+                            System.currentTimeMillis() - pressStartTime < ULTRA_SHORT_TOUCH_TIMEOUT) {
+                            // 启动应用
+                            v.performClick();
+                        }
+                        return true;
+                }
+                return true; // 始终消费触摸事件以确保控制完全在我们手中
+            }
+        });
+
+        // 设置点击监听器以打开应用
         appView.setOnClickListener(v -> {
             try {
+                // 拖拽操作期间不触发点击
+                if (CellLayout.isInDragging()) return;
+                
                 Intent launchIntent = packageManager.getLaunchIntentForPackage(app.getPackageName());
                 if (launchIntent != null) {
                     startActivity(launchIntent);
@@ -1003,95 +1272,79 @@ public class WorkspaceFragment extends Fragment {
             }
         });
 
-        // 设置长按监听器以支持拖拽
-        appView.setOnLongClickListener(v -> {
-            // 空单元格不能拖拽
-            if (app.getPackageName().equals("empty")) {
-                return false;
-            }
+        return appView;
+    }
 
-            // 执行高级触感反馈
-            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS, VIBRATION_DRAG_START);
-
+    // 抽取拖拽操作逻辑为单独的方法，减少代码重复
+    private void startDragOperation(View view, String packageName) {
+        try {
             // 创建要传递的数据
             ClipData dragData = new ClipData(
-                    app.getPackageName(),
+                    packageName,
                     new String[] { ClipDescription.MIMETYPE_TEXT_PLAIN },
-                    new ClipData.Item(app.getPackageName())
+                    new ClipData.Item(packageName)
             );
 
             // 创建拖拽阴影
-            View.DragShadowBuilder shadowBuilder = new View.DragShadowBuilder(v) {
+            View.DragShadowBuilder shadowBuilder = new View.DragShadowBuilder(view) {
                 @Override
                 public void onProvideShadowMetrics(Point outShadowSize, Point outShadowTouchPoint) {
                     super.onProvideShadowMetrics(outShadowSize, outShadowTouchPoint);
-                    
-                    // 不增加拖拽阴影尺寸，保持原始大小
-                    // outShadowSize.x = (int)(outShadowSize.x * 1.15f);
-                    // outShadowSize.y = (int)(outShadowSize.y * 1.15f);
-                    
-                    // 调整触摸点在阴影中的位置，使其在图标中心
                     outShadowTouchPoint.set(outShadowSize.x / 2, outShadowSize.y / 3);
                 }
                 
                 @Override
                 public void onDrawShadow(Canvas canvas) {
-                    // 增强拖拽时的阴影效果
                     canvas.save();
-                    
-                    // 移除缩放效果，保持原始大小
-                    // float scale = 0.92f;
-                    // canvas.scale(scale, scale, canvas.getWidth()/2f, canvas.getHeight()/2f);
-                    
-                    // 平移效果，使阴影稍微上移
                     canvas.translate(0, -12);
-                    
-                    // 绘制原始视图作为阴影
                     super.onDrawShadow(canvas);
-                    
                     canvas.restore();
                 }
             };
             
-            // 拖拽前应用弹性动画效果（使用OvershootInterpolator实现更生动的弹性效果）
-            v.animate()
-                .scaleX(1.0f)
-                .scaleY(1.0f)
-                .alpha(0.9f)
-                .setInterpolator(new OvershootInterpolator(1.2f))
-                .setDuration(180)
-                .withEndAction(() -> {
-                    // 开始拖拽操作
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        v.startDragAndDrop(
-                                dragData,
-                                shadowBuilder,
-                                new CellLayout.Cell(app.getPackageName(), v), // 传递Cell对象作为本地状态
-                                View.DRAG_FLAG_OPAQUE
-                        );
-                    } else {
-                        v.startDrag(
-                                dragData,
-                                shadowBuilder,
-                                new CellLayout.Cell(app.getPackageName(), v),
-                                View.DRAG_FLAG_OPAQUE
-                        );
+            // 设置静态标志，标记已开始拖拽
+            CellLayout.setDraggingState(true);
+            
+            // 避免动画造成的卡顿，直接开始拖拽
+            view.setVisibility(View.INVISIBLE);
+            
+            // 开始拖拽操作
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                view.startDragAndDrop(
+                        dragData,
+                        shadowBuilder,
+                        new CellLayout.Cell(packageName, view),
+                        View.DRAG_FLAG_OPAQUE
+                );
+            } else {
+                view.startDrag(
+                        dragData,
+                        shadowBuilder,
+                        new CellLayout.Cell(packageName, view),
+                        View.DRAG_FLAG_OPAQUE
+                );
+            }
+            
+            // 添加延迟重置拖拽状态的机制，防止卡死
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                // 如果拖拽超时，强制重置状态
+                if (CellLayout.isInDragging()) {
+                    Log.w(TAG, "检测到拖拽状态超时，强制重置");
+                    CellLayout.setDraggingState(false);
+                    
+                    // 确保视图可见
+                    if (view.getVisibility() != View.VISIBLE) {
+                        view.setVisibility(View.VISIBLE);
                     }
-                    
-                    // 临时隐藏原视图
-                    v.setVisibility(View.INVISIBLE);
-                    
-                    // 还原视图的缩放和透明度
-                    v.setScaleX(1.0f);
-                    v.setScaleY(1.0f);
-                    v.setAlpha(1.0f);
-                })
-                .start();
-
-            return true;
-        });
-
-        return appView;
+                }
+            }, 8000); // 8秒超时保护
+        } catch (Exception e) {
+            Log.e(TAG, "启动拖拽操作失败: " + e.getMessage());
+            // 重置拖拽状态
+            CellLayout.setDraggingState(false);
+            // 确保视图可见
+            view.setVisibility(View.VISIBLE);
+        }
     }
 
     /**
@@ -1129,268 +1382,289 @@ public class WorkspaceFragment extends Fragment {
     }
 
     /**
-     * 处理单元格在不同页面间的交换
+     * 处理单元格在不同页面间的交换的优化版本
      */
     private void handleCellSwap(CellLayout.Cell draggingCell, int fromPage, int toPage, int targetColumn, int targetRow) {
         if (draggingCell == null) return;
         
-        Log.d(TAG, "处理跨页面拖拽: 从页面 " + fromPage + " 到页面 " + toPage + 
-                " 位置(" + targetColumn + "," + targetRow + ")");
-        
-        AppModel app = null;
-        
-        // 获取拖拽的应用信息
-        String packageName = draggingCell.getTag();
-        
-        // 检查是否是跨页面拖拽
-        boolean isCrossPageDrag = packageName != null && packageName.contains(":cross_page");
-        int originalFromPage = fromPage;
-        
-        // 如果是跨页拖拽，提取原始包名和真实源页面
-        if (isCrossPageDrag) {
-            String[] parts = packageName.split(":");
-            if (parts.length >= 3) {
-                try {
-                    packageName = parts[0]; // 恢复原始包名
-                    draggingCell.setTag(packageName); // 更新单元格标签
-                    
-                    // 更新源页面索引
-                    originalFromPage = Integer.parseInt(parts[parts.length - 1]);
-                    Log.d(TAG, "跨页拖拽: 原始来源页面=" + originalFromPage + ", 当前来源页面=" + fromPage);
-                } catch (Exception e) {
-                    Log.e(TAG, "解析跨页拖拽信息失败", e);
-                }
-            }
-        }
-        
-        // 如果包名为空或为"empty"，返回
-        if (packageName == null || "empty".equals(packageName)) return;
-        
-        // 从当前页面中移除应用
-        boolean needRemoveFromSource = false;
-        if (fromPage >= 0 && fromPage < workspaceCells.size()) {
-            List<CellLayout.Cell> sourcePage = workspaceCells.get(fromPage);
-            for (int i = 0; i < sourcePage.size(); i++) {
-                CellLayout.Cell cell = sourcePage.get(i);
-                if (cell != null && packageName.equals(cell.getTag())) {
-                    // 获取应用模型
-                    View view = cell.getContentView();
-                    if (view != null && view.getTag() instanceof AppModel) {
-                        app = (AppModel) view.getTag();
-                    }
-                    // 将源位置替换为空白单元格
-                    View emptyView = new View(getContext());
-                    emptyView.setVisibility(View.INVISIBLE);
-                    CellLayout.Cell emptyCell = new CellLayout.Cell("empty", emptyView);
-                    sourcePage.set(i, emptyCell);
-                    needRemoveFromSource = true;
-                    
-                    // 添加移除时的触感反馈
-                    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, VIBRATION_DRAG_MOVE);
-                    
-                    // 添加动画效果
-                    if (isAdded() && !isDetached()) {
-                        View oldCellView = getViewForPage(fromPage);
-                        if (oldCellView != null) {
-                            new Handler(Looper.getMainLooper()).post(() -> {
-                                setupWorkspacePage(fromPage);
-                                oldCellView.animate()
-                                    .alpha(0.7f)
-                                    .scaleX(1.0f)
-                                    .scaleY(1.0f)
-                                    .setInterpolator(new AccelerateDecelerateInterpolator())
-                                    .setDuration(150)
-                                    .withEndAction(() -> {
-                                        oldCellView.animate()
-                                            .alpha(1.0f)
-                                            .scaleX(1.0f)
-                                            .scaleY(1.0f)
-                                            .setDuration(200)
-                                            .start();
-                                    })
-                                    .start();
-                            });
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-        
-        // 如果无法找到应用信息，尝试从packageName创建
-        if (app == null) {
-            try {
-                // 从系统获取应用信息
-                app = createAppFromPackage(packageName);
-            } catch (Exception e) {
-                Log.e(TAG, "无法创建应用: " + e.getMessage());
-                return;
-            }
-        }
-        
-        if (app == null) {
-            Log.e(TAG, "没有找到应用信息: " + packageName);
-            return;
-        }
-        
-        // 计算在页面中的确切位置
-        int positionInPage = targetRow * COLUMNS + targetColumn;
-        
-        // 确保目标页面存在
-        int currentPageCount = workspaceCells.size();
-        int targetPageIndex = toPage;
-        if (toPage < 0) {
-            // 使用当前选中的页面
-            targetPageIndex = workspacePager.getCurrentItem();
-        }
-        
-        // 确保页面索引有效
-        if (targetPageIndex >= currentPageCount) {
-            // 添加新页面直到目标页面存在
-            while (workspaceCells.size() <= targetPageIndex) {
-                addNewPage();
-            }
-        }
-        
-        // 获取目标页面
-        List<CellLayout.Cell> targetPage = workspaceCells.get(targetPageIndex);
-        
-        // 确保位置索引有效
-        if (positionInPage >= 0 && positionInPage < targetPage.size()) {
-            // 创建应用图标视图
-            View appView = createAppIconView(app);
-            if (appView == null) return;
+        try {
+            Log.d(TAG, "处理跨页面拖拽: 从页面 " + fromPage + " 到页面 " + toPage + 
+                    " 位置(" + targetColumn + "," + targetRow + ")");
             
-            // 设置初始动画属性
-            appView.setScaleX(1.0f);
-            appView.setScaleY(1.0f);
-            appView.setAlpha(0.7f);
+            AppModel app = null;
             
-            // 创建单元格并替换目标位置
-            CellLayout.Cell appCell = new CellLayout.Cell(packageName, appView);
-            CellLayout.Cell originalCell = targetPage.get(positionInPage);
+            // 获取拖拽的应用信息
+            String packageName = draggingCell.getTag();
             
-            // 如果目标不是空白单元格，需要处理位置交换
-            if (originalCell != null && !"empty".equals(originalCell.getTag())) {
-                // 判断是否需要处理跨页面挤出效果
-                boolean needCrossPageEffect = targetPageIndex == currentPageCount - 1 && 
-                        positionInPage == targetPage.size() - 1;
-                
-                if (needCrossPageEffect && workspaceCells.size() < 5) {
-                    // 需要创建新页面并显示挤出动画
-                    List<CellLayout.Cell> newPage = createEmptyPage();
-                    // 挤出的单元格移到新页面第一个位置
-                    newPage.set(0, originalCell);
-                    // 添加新页面
-                    workspaceCells.add(newPage);
-                    
-                    // 创建挤出动画
-                    if (isAdded() && !isDetached()) {
-                        // 保存目标单元格的视图状态
-                        View targetCellView = originalCell.getContentView();
+            // 检查是否是跨页面拖拽
+            boolean isCrossPageDrag = packageName != null && packageName.contains(":cross_page");
+            int originalFromPage = fromPage;
+            
+            // 如果是跨页拖拽，提取原始包名和真实源页面
+            if (isCrossPageDrag) {
+                String[] parts = packageName.split(":");
+                if (parts.length >= 3) {
+                    try {
+                        packageName = parts[0]; // 恢复原始包名
+                        draggingCell.setTag(packageName); // 更新单元格标签
                         
-                        // 创建挤出动画视图（临时添加到当前页面）
-                        if (targetCellView != null) {
-                            // 复制视图位置和属性
-                            int[] location = new int[2];
-                            targetCellView.getLocationOnScreen(location);
-                            
-                            // 添加临时视图
-                            View tempView = new View(requireContext());
-                            tempView.setBackground(targetCellView.getBackground());
-                            tempView.setLayoutParams(targetCellView.getLayoutParams());
-                            
-                            // 将临时视图添加到当前页面
-                            ViewGroup currentPageView = (ViewGroup) getViewForPage(targetPageIndex);
-                            if (currentPageView != null) {
-                                currentPageView.addView(tempView);
-                                
-                                // 设置初始位置
-                                tempView.setX(targetCellView.getX());
-                                tempView.setY(targetCellView.getY());
-                                
-                                // 启动挤出动画
-                                tempView.animate()
-                                    .translationXBy(currentPageView.getWidth())
-                                    .alpha(0f)
-                                    .setDuration(300)
-                                    .setInterpolator(new AccelerateDecelerateInterpolator())
-                                    .withEndAction(() -> {
-                                        currentPageView.removeView(tempView);
-                                        
-                                        // 更新页面指示器
-                                        initPageIndicator();
-                                        
-                                        // 通知适配器更新
-                                        if (workspacePager.getAdapter() != null) {
-                                            workspacePager.getAdapter().notifyItemInserted(workspaceCells.size() - 1);
-                                        }
-                                    })
-                                    .start();
+                        // 更新源页面索引 - 修复格式为 packageName:cross_page:pageIndex:timestamp
+                        if (parts.length >= 4 && "cross_page".equals(parts[1])) {
+                            originalFromPage = Integer.parseInt(parts[2]); // 获取页面索引部分
+                        } else {
+                            // 兼容旧格式
+                            originalFromPage = Integer.parseInt(parts[parts.length - 1]);
+                        }
+                        
+                        Log.d(TAG, "跨页拖拽: 原始来源页面=" + originalFromPage + ", 当前来源页面=" + fromPage);
+                    } catch (Exception e) {
+                        Log.e(TAG, "解析跨页拖拽信息失败", e);
+                    }
+                }
+            }
+            
+            // 如果包名为空或为"empty"，返回
+            if (packageName == null || "empty".equals(packageName)) return;
+            
+            // 从当前页面中移除应用
+            boolean needRemoveFromSource = false;
+            if (fromPage >= 0 && fromPage < workspaceCells.size()) {
+                List<CellLayout.Cell> sourcePage = workspaceCells.get(fromPage);
+                for (int i = 0; i < sourcePage.size(); i++) {
+                    CellLayout.Cell cell = sourcePage.get(i);
+                    if (cell != null && packageName.equals(cell.getTag())) {
+                        // 获取应用模型
+                        View view = cell.getContentView();
+                        if (view != null && view.getTag() instanceof AppModel) {
+                            app = (AppModel) view.getTag();
+                        }
+                        // 将源位置替换为空白单元格
+                        View emptyView = new View(getContext());
+                        emptyView.setVisibility(View.INVISIBLE);
+                        CellLayout.Cell emptyCell = new CellLayout.Cell("empty", emptyView);
+                        sourcePage.set(i, emptyCell);
+                        needRemoveFromSource = true;
+                        
+                        // 添加移除时的触感反馈
+                        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, VIBRATION_DRAG_MOVE);
+                        
+                        // 添加动画效果
+                        if (isAdded() && !isDetached()) {
+                            View oldCellView = getViewForPage(fromPage);
+                            if (oldCellView != null) {
+                                new Handler(Looper.getMainLooper()).post(() -> {
+                                    setupWorkspacePage(fromPage);
+                                    oldCellView.animate()
+                                        .alpha(0.7f)
+                                        .scaleX(1.0f)
+                                        .scaleY(1.0f)
+                                        .setInterpolator(new AccelerateDecelerateInterpolator())
+                                        .setDuration(150)
+                                        .withEndAction(() -> {
+                                            oldCellView.animate()
+                                                .alpha(1.0f)
+                                                .scaleX(1.0f)
+                                                .scaleY(1.0f)
+                                                .setDuration(200)
+                                                .start();
+                                        })
+                                        .start();
+                                });
                             }
                         }
-                    }
-                } else {
-                    // 寻找空白单元格位置
-                    int emptyIndex = findEmptyCell(targetPage);
-                    if (emptyIndex >= 0) {
-                        // 将原单元格移至空白位置
-                        targetPage.set(emptyIndex, originalCell);
-                    } else {
-                        // 无空白单元格，添加到下一页
-                        handleCellOverflow(originalCell, targetPageIndex);
+                        break;
                     }
                 }
             }
             
-            // 设置新单元格到目标位置
-            targetPage.set(positionInPage, appCell);
-            
-            // 刷新目标页面视图
-            View targetPageView = getViewForPage(targetPageIndex);
-            
-            // 播放放置动画
-            if (targetPageView != null) {
-                int finalTargetPageIndex = targetPageIndex;
-                new Handler(Looper.getMainLooper()).post(() -> {
-                    setupWorkspacePage(finalTargetPageIndex);
-                    
-                    // 提供放置时的触感反馈
-                    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, VIBRATION_DRAG_END);
-                    
-                    // 添加图标放置动画效果 - 使用OvershootInterpolator实现更生动的放置效果
-                    appView.animate()
-                        .scaleX(1.0f)
-                        .scaleY(1.0f)
-                        .alpha(1.0f)
-                        .setInterpolator(new OvershootInterpolator(0.8f))
-                        .setDuration(300)
-                        .start();
-                    
-                    // 页面微震动动画
-                    targetPageView.animate()
-                        .scaleX(1.0f)
-                        .scaleY(1.0f)
-                        .setDuration(120)
-                        .withEndAction(() -> {
-                            targetPageView.animate()
-                                .scaleX(1.0f)
-                                .scaleY(1.0f)
-                                .setInterpolator(new OvershootInterpolator(0.3f))
-                                .setDuration(180)
-                                .start();
-                        }).start();
-                });
+            // 如果无法找到应用信息，尝试从packageName创建
+            if (app == null) {
+                try {
+                    // 从系统获取应用信息
+                    app = createAppFromPackage(packageName);
+                } catch (Exception e) {
+                    Log.e(TAG, "无法创建应用: " + e.getMessage());
+                    return;
+                }
             }
             
-            // 刷新视图
-            setupWorkspacePage(targetPageIndex);
-            if (needRemoveFromSource && fromPage >= 0 && fromPage != targetPageIndex) {
-                setupWorkspacePage(fromPage);
+            if (app == null) {
+                Log.e(TAG, "没有找到应用信息: " + packageName);
+                return;
             }
             
-            // 保存更新后的位置
-            saveAppPositions();
+            // 计算在页面中的确切位置
+            int positionInPage = targetRow * COLUMNS + targetColumn;
+            
+            // 确保目标页面存在
+            int currentPageCount = workspaceCells.size();
+            int targetPageIndex = toPage;
+            if (toPage < 0) {
+                // 使用当前选中的页面
+                targetPageIndex = workspacePager.getCurrentItem();
+            }
+            
+            // 确保页面索引有效
+            if (targetPageIndex >= currentPageCount) {
+                // 添加新页面直到目标页面存在
+                while (workspaceCells.size() <= targetPageIndex) {
+                    addNewPage();
+                }
+            }
+            
+            // 获取目标页面
+            List<CellLayout.Cell> targetPage = workspaceCells.get(targetPageIndex);
+            
+            // 确保位置索引有效
+            if (positionInPage >= 0 && positionInPage < targetPage.size()) {
+                // 创建应用图标视图
+                View appView = createAppIconView(app);
+                if (appView == null) return;
+                
+                // 设置初始动画属性
+                appView.setScaleX(1.0f);
+                appView.setScaleY(1.0f);
+                appView.setAlpha(0.7f);
+                
+                // 创建单元格并替换目标位置
+                CellLayout.Cell appCell = new CellLayout.Cell(packageName, appView);
+                CellLayout.Cell originalCell = targetPage.get(positionInPage);
+                
+                // 如果目标不是空白单元格，需要处理位置交换
+                if (originalCell != null && !"empty".equals(originalCell.getTag())) {
+                    // 判断是否需要处理跨页面挤出效果
+                    boolean needCrossPageEffect = targetPageIndex == currentPageCount - 1 && 
+                            positionInPage == targetPage.size() - 1;
+                    
+                    if (needCrossPageEffect && workspaceCells.size() < 5) {
+                        // 需要创建新页面并显示挤出动画
+                        List<CellLayout.Cell> newPage = createEmptyPage();
+                        // 挤出的单元格移到新页面第一个位置
+                        newPage.set(0, originalCell);
+                        // 添加新页面
+                        workspaceCells.add(newPage);
+                        
+                        // 创建挤出动画
+                        if (isAdded() && !isDetached()) {
+                            // 保存目标单元格的视图状态
+                            View targetCellView = originalCell.getContentView();
+                            
+                            // 创建挤出动画视图（临时添加到当前页面）
+                            if (targetCellView != null) {
+                                // 复制视图位置和属性
+                                int[] location = new int[2];
+                                targetCellView.getLocationOnScreen(location);
+                                
+                                // 添加临时视图
+                                View tempView = new View(requireContext());
+                                tempView.setBackground(targetCellView.getBackground());
+                                tempView.setLayoutParams(targetCellView.getLayoutParams());
+                                
+                                // 将临时视图添加到当前页面
+                                ViewGroup currentPageView = (ViewGroup) getViewForPage(targetPageIndex);
+                                if (currentPageView != null) {
+                                    currentPageView.addView(tempView);
+                                    
+                                    // 设置初始位置
+                                    tempView.setX(targetCellView.getX());
+                                    tempView.setY(targetCellView.getY());
+                                    
+                                    // 启动挤出动画
+                                    tempView.animate()
+                                        .translationXBy(currentPageView.getWidth())
+                                        .alpha(0f)
+                                        .setDuration(300)
+                                        .setInterpolator(new AccelerateDecelerateInterpolator())
+                                        .withEndAction(() -> {
+                                            currentPageView.removeView(tempView);
+                                            
+                                            // 更新页面指示器
+                                            initPageIndicator();
+                                            
+                                            // 通知适配器更新
+                                            if (workspacePager.getAdapter() != null) {
+                                                workspacePager.getAdapter().notifyItemInserted(workspaceCells.size() - 1);
+                                            }
+                                        })
+                                        .start();
+                                }
+                            }
+                        }
+                    } else {
+                        // 寻找空白单元格位置
+                        int emptyIndex = findEmptyCell(targetPage);
+                        if (emptyIndex >= 0) {
+                            // 将原单元格移至空白位置
+                            targetPage.set(emptyIndex, originalCell);
+                        } else {
+                            // 无空白单元格，添加到下一页
+                            handleCellOverflow(originalCell, targetPageIndex);
+                        }
+                    }
+                }
+                
+                // 设置新单元格到目标位置
+                targetPage.set(positionInPage, appCell);
+                
+                // 刷新目标页面视图
+                View targetPageView = getViewForPage(targetPageIndex);
+                
+                // 播放放置动画
+                if (targetPageView != null) {
+                    int finalTargetPageIndex = targetPageIndex;
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        setupWorkspacePage(finalTargetPageIndex);
+                        
+                        // 提供放置时的触感反馈
+                        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY, VIBRATION_DRAG_END);
+                        
+                        // 添加图标放置动画效果 - 使用OvershootInterpolator实现更生动的放置效果
+                        appView.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .alpha(1.0f)
+                            .setInterpolator(new OvershootInterpolator(0.8f))
+                            .setDuration(300)
+                            .start();
+                        
+                        // 页面微震动动画
+                        targetPageView.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(120)
+                            .withEndAction(() -> {
+                                targetPageView.animate()
+                                    .scaleX(1.0f)
+                                    .scaleY(1.0f)
+                                    .setInterpolator(new OvershootInterpolator(0.3f))
+                                    .setDuration(180)
+                                    .start();
+                            }).start();
+                    });
+                }
+                
+                // 刷新视图
+                setupWorkspacePage(targetPageIndex);
+                if (needRemoveFromSource && fromPage >= 0 && fromPage != targetPageIndex) {
+                    setupWorkspacePage(fromPage);
+                }
+                
+                // 保存更新后的位置 (确保立即保存)
+                saveAppPositions();
+                
+                // 强制更新所有受影响的页面
+                setupWorkspacePage(targetPageIndex);
+                if (needRemoveFromSource && fromPage >= 0 && fromPage != targetPageIndex) {
+                    setupWorkspacePage(fromPage);
+                }
+                
+                // 确保重置拖拽状态
+                CellLayout.setDraggingState(false);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "处理单元格交换失败: " + e.getMessage());
+            // 确保重置拖拽状态
+            CellLayout.setDraggingState(false);
         }
     }
 
@@ -1531,9 +1805,18 @@ public class WorkspaceFragment extends Fragment {
         // 更新页面指示器
         initPageIndicator();
         
-        // 通知适配器更新
+        // 通知适配器更新，使用正确的更新方法
         if (workspacePager.getAdapter() != null) {
-            workspacePager.getAdapter().notifyDataSetChanged();
+            workspacePager.getAdapter().notifyItemRemoved(pageIndex);
+            
+            // 通知范围变化，确保整个ViewPager2刷新
+            if (pageIndex < workspacePager.getAdapter().getItemCount()) {
+                workspacePager.getAdapter().notifyItemRangeChanged(pageIndex, 
+                                                                workspacePager.getAdapter().getItemCount() - pageIndex);
+            }
+            
+            // 添加日志记录
+            Log.d(TAG, "已移除页面: " + pageIndex + ", 当前总页数: " + workspaceCells.size());
         }
         
         // 如果当前页面被删除或索引变化，更新当前页面

@@ -13,6 +13,7 @@ import android.view.View;
 import android.view.animation.OvershootInterpolator;
 
 import androidx.annotation.Nullable;
+import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager2.widget.ViewPager2;
 
 import com.msk.blacklauncher.R;
@@ -35,6 +36,8 @@ public class PageIndicator extends View {
     private int currentPage = 0;
     private float currentPageOffset = 0;
     private ViewPager2 viewPager;
+    private RecyclerView.AdapterDataObserver adapterDataObserver;
+    private ViewPager2.OnPageChangeCallback pageChangeCallback;
     
     // 保存每个点的颜色和缩放值
     private float[] dotScales;
@@ -144,6 +147,15 @@ public class PageIndicator extends View {
             int color = (dotColors != null && i < dotColors.length) ? dotColors[i] : unselectedColor;
             float scale = (dotScales != null && i < dotScales.length) ? dotScales[i] : 1.0f;
             
+            // 当前选中页使用选中颜色
+            if (i == currentPage) {
+                color = selectedColor;
+                scale = 1.2f; // 选中的点稍微放大
+            } else {
+                color = unselectedColor;
+                scale = 1.0f;
+            }
+            
             // 绘制点
             dotPaint.setColor(color);
             canvas.drawCircle(cx, centerY, dotRadius * scale, dotPaint);
@@ -191,6 +203,10 @@ public class PageIndicator extends View {
 
     public void setupWithViewPager(ViewPager2 viewPager) {
         Log.d(TAG, "setupWithViewPager: 开始设置");
+        
+        // 清理上一次的设置
+        cleanupViewPager();
+        
         this.viewPager = viewPager;
         
         if (viewPager.getAdapter() == null) {
@@ -203,8 +219,8 @@ public class PageIndicator extends View {
         Log.d(TAG, "setupWithViewPager: ViewPager2有 " + itemCount + " 个页面");
         setPageCount(itemCount);
         
-        // 注册页面变化回调
-        viewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+        // 创建新的页面变化回调
+        pageChangeCallback = new ViewPager2.OnPageChangeCallback() {
             @Override
             public void onPageSelected(int position) {
                 Log.d(TAG, "onPageSelected: " + position);
@@ -216,7 +232,41 @@ public class PageIndicator extends View {
                 // 平滑动画效果
                 animateDotTransition(position, positionOffset);
             }
-        });
+        };
+        
+        // 注册适配器数据变化的观察者
+        adapterDataObserver = new RecyclerView.AdapterDataObserver() {
+            @Override
+            public void onChanged() {
+                updatePageCount();
+            }
+            
+            @Override
+            public void onItemRangeChanged(int positionStart, int itemCount) {
+                updatePageCount();
+            }
+            
+            @Override
+            public void onItemRangeInserted(int positionStart, int itemCount) {
+                updatePageCount();
+            }
+            
+            @Override
+            public void onItemRangeRemoved(int positionStart, int itemCount) {
+                updatePageCount();
+            }
+            
+            @Override
+            public void onItemRangeMoved(int fromPosition, int toPosition, int itemCount) {
+                updatePageCount();
+            }
+        };
+        
+        // 注册页面变化回调
+        viewPager.registerOnPageChangeCallback(pageChangeCallback);
+        
+        // 注册适配器数据变化观察者
+        viewPager.getAdapter().registerAdapterDataObserver(adapterDataObserver);
         
         // 设置当前页面
         setCurrentPage(viewPager.getCurrentItem());
@@ -229,7 +279,7 @@ public class PageIndicator extends View {
             // 计算点击位置对应的页面索引
             int touchX = (int) v.getX();
             int dotWidth = 2 * dotRadius + dotSpacing;
-            int startX = (getWidth() - (pageCount * dotWidth - dotSpacing)) / 2;
+            int startX = dotMarginStart;
             
             // 计算点击的是哪个点
             int clickedDot = (touchX - startX) / dotWidth;
@@ -237,6 +287,40 @@ public class PageIndicator extends View {
                 viewPager.setCurrentItem(clickedDot, true);
             }
         });
+    }
+    
+    private void updatePageCount() {
+        if (viewPager != null && viewPager.getAdapter() != null) {
+            int newCount = viewPager.getAdapter().getItemCount();
+            if (pageCount != newCount) {
+                Log.d(TAG, "页面数量已变更: " + pageCount + " -> " + newCount);
+                setPageCount(newCount);
+            }
+        }
+    }
+    
+    private void cleanupViewPager() {
+        if (viewPager != null) {
+            // 注销页面变化回调
+            if (pageChangeCallback != null) {
+                viewPager.unregisterOnPageChangeCallback(pageChangeCallback);
+                pageChangeCallback = null;
+            }
+            
+            // 注销适配器数据变化观察者
+            if (viewPager.getAdapter() != null && adapterDataObserver != null) {
+                viewPager.getAdapter().unregisterAdapterDataObserver(adapterDataObserver);
+                adapterDataObserver = null;
+            }
+            
+            viewPager = null;
+        }
+    }
+    
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        cleanupViewPager();
     }
     
     private void animateDotTransition(int position, float positionOffset) {
@@ -320,6 +404,7 @@ public class PageIndicator extends View {
      */
     public void setupManually(int totalPages, int currentPage) {
         Log.d(TAG, "setupManually: 总页数=" + totalPages + ", 当前页=" + currentPage);
+        cleanupViewPager(); // 确保先清理之前的设置
         this.viewPager = null; // 不依赖ViewPager2
         setPageCount(totalPages);
         setCurrentPage(currentPage);

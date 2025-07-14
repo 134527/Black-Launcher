@@ -1,4 +1,4 @@
-package com.msk.blacklauncher.activities;
+ package com.msk.blacklauncher.activities;
 
 import android.app.Activity;
 import android.app.WallpaperManager;
@@ -86,7 +86,6 @@ public class WallpaperPreviewActivity extends AppCompatActivity {
             wallpaperName = intent.getStringExtra("wallpaper_name");
             wallpaperId = intent.getStringExtra("wallpaper_id");
             isAsset = intent.getBooleanExtra("is_asset", false);
-            
             if (uriString != null) {
                 imageUri = Uri.parse(uriString);
                 loadWallpaperImage();

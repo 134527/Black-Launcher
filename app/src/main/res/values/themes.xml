@@ -14,7 +14,14 @@
         <item name="android:windowTranslucentStatus">true</item>
         <item name="android:windowTranslucentNavigation">true</item>
     </style>
-    <style name="Theme.BlackLauncher" parent="Base.Theme.BlackLauncher" />
+    <style name="Theme.BlackLauncher" parent="Base.Theme.BlackLauncher">
+        <!-- 固定字体和显示大小 -->
+        <item name="android:textSize">@dimen/fixed_text_size</item>
+        <item name="android:textViewStyle">@style/FixedTextViewStyle</item>
+        <item name="android:buttonStyle">@style/FixedButtonStyle</item>
+        <item name="android:editTextStyle">@style/FixedEditTextStyle</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
+    </style>
 
     <style name="CustomAlertDialog" parent="Theme.AppCompat.Light.Dialog.Alert">
         <item name="android:windowBackground">@drawable/dialog_background</item>
@@ -73,5 +80,23 @@
         <item name="android:windowTranslucentStatus">true</item>
         <item name="android:windowTranslucentNavigation">true</item>
         <item name="android:fitsSystemWindows">false</item>
+    </style>
+    
+    <!-- 固定大小的TextView样式 -->
+    <style name="FixedTextViewStyle" parent="android:Widget.TextView">
+        <item name="android:textSize">@dimen/fixed_text_size</item>
+        <item name="android:textScaleX">1.0</item>
+    </style>
+    
+    <!-- 固定大小的Button样式 -->
+    <style name="FixedButtonStyle" parent="android:Widget.Button">
+        <item name="android:textSize">@dimen/fixed_text_size</item>
+        <item name="android:textScaleX">1.0</item>
+    </style>
+    
+    <!-- 固定大小的EditText样式 -->
+    <style name="FixedEditTextStyle" parent="android:Widget.EditText">
+        <item name="android:textSize">@dimen/fixed_text_size</item>
+        <item name="android:textScaleX">1.0</item>
     </style>
 </resources>

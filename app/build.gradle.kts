@@ -70,6 +70,8 @@ dependencies {
     implementation ("com.github.li-xiaojun:XPopup:2.10.0")
     implementation ("com.google.android.material:material:1.4.0")
     implementation ("androidx.recyclerview:recyclerview:1.2.1")
+    implementation ("de.hdodenhof:circleimageview:3.1.0")
+    implementation(files("E:\\JryO\\Black-Launcher\\app\\libs\\workspace-lib.jar"))
     compileOnly(files("E:\\JryO\\Black-Launcher\\app\\libs\\framework.jar"))
 
 

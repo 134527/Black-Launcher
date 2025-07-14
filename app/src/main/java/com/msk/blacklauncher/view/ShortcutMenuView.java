@@ -36,6 +36,10 @@ import java.util.List;
 import android.util.Log;
 import android.app.Activity;
 import android.widget.FrameLayout;
+import android.app.ActivityManager;
+import android.content.ComponentName;
+import java.lang.reflect.Field;
+import java.util.Map;
 
 public class ShortcutMenuView {
     private final Context context;
@@ -254,52 +258,123 @@ public class ShortcutMenuView {
     }
     
     /**
-     * 卸载应用的公共方法，抽取共用逻辑
+     * 卸载应用的公共方法，改进版
      */
     private void uninstallApp() {
         try {
             Log.d(TAG, "开始卸载应用: " + packageName);
             
-            // 使用原始上下文，因为它更可能是Activity
-            Intent intent = new Intent(Intent.ACTION_DELETE);
-            intent.setData(Uri.parse("package:" + packageName));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            // 先关闭菜单
+            dismiss();
             
-            // 尝试解析Intent
-            PackageManager pm = context.getPackageManager();
-            boolean canHandle = false;
-            try {
-                canHandle = intent.resolveActivity(pm) != null;
-            } catch (Exception e) {
-                Log.e(TAG, "解析卸载Intent失败", e);
-            }
-            
-            if (canHandle) {
-                // 直接使用原始上下文启动卸载
-                context.startActivity(intent);
-                Log.d(TAG, "卸载请求已发送: " + packageName);
-            } else {
-                // 尝试备用卸载Intent
-                Log.d(TAG, "标准卸载Intent无法处理，尝试备用Intent");
-                Intent uninstallIntent = new Intent(Intent.ACTION_UNINSTALL_PACKAGE);
-                uninstallIntent.setData(Uri.parse("package:" + packageName));
-                uninstallIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                
+            // 使用一个短延迟确保PopupWindow完全关闭
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 try {
-                    context.startActivity(uninstallIntent);
-                    Log.d(TAG, "备用卸载请求已发送: " + packageName);
+                    // 获取activity上下文以确保正确启动
+                    Context activityContext = context;
+                    if (!(context instanceof Activity) && context.getApplicationContext() != null) {
+                        // 尝试从应用上下文找到当前活动的Activity
+                        ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+                        if (am != null) {
+                            List<ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(1);
+                            if (!tasks.isEmpty()) {
+                                ComponentName topActivity = tasks.get(0).topActivity;
+                                if (topActivity != null && topActivity.getPackageName().equals(context.getPackageName())) {
+                                    // 尝试使用反射获取当前活动的Activity
+                                    try {
+                                        Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
+                                        Object activityThread = activityThreadClass.getMethod("currentActivityThread").invoke(null);
+                                        Field activitiesField = activityThreadClass.getDeclaredField("mActivities");
+                                        activitiesField.setAccessible(true);
+                                        
+                                        // 实现细节可能因Android版本而异
+                                        Map<Object, Object> activities = (Map<Object, Object>) activitiesField.get(activityThread);
+                                        if (activities != null) {
+                                            for (Object activityRecord : activities.values()) {
+                                                Field activityField = activityRecord.getClass().getDeclaredField("activity");
+                                                activityField.setAccessible(true);
+                                                Activity activity = (Activity) activityField.get(activityRecord);
+                                                if (activity != null) {
+                                                    activityContext = activity;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    } catch (Exception e) {
+                                        Log.e(TAG, "反射获取Activity失败: " + e.getMessage());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 尝试多种方式卸载应用
+                    boolean success = false;
+                    
+                    // 方法1: 标准卸载Intent
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_DELETE);
+                        intent.setData(Uri.parse("package:" + packageName));
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        
+                        // 如果有Activity上下文，使用startActivityForResult
+                        if (activityContext instanceof Activity) {
+                            ((Activity) activityContext).startActivityForResult(intent, 1001);
+                            success = true;
+                        } else {
+                            activityContext.startActivity(intent);
+                            success = true;
+                        }
+                        
+                        Log.d(TAG, "方法1: 标准卸载Intent已发送");
+                    } catch (Exception e) {
+                        Log.e(TAG, "方法1失败: " + e.getMessage());
+                    }
+                    
+                    // 如果方法1失败，尝试方法2
+                    if (!success) {
+                        try {
+                            Intent intent = new Intent(Intent.ACTION_UNINSTALL_PACKAGE);
+                            intent.setData(Uri.parse("package:" + packageName));
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            activityContext.startActivity(intent);
+                            success = true;
+                            Log.d(TAG, "方法2: ACTION_UNINSTALL_PACKAGE Intent已发送");
+                        } catch (Exception e) {
+                            Log.e(TAG, "方法2失败: " + e.getMessage());
+                        }
+                    }
+                    
+                    // 如果方法2失败，尝试方法3: 通过应用商店卸载
+                    if (!success) {
+                        try {
+                            Intent intent = new Intent(Intent.ACTION_VIEW);
+                            intent.setData(Uri.parse("market://details?id=" + packageName));
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            activityContext.startActivity(intent);
+                            success = true;
+                            Log.d(TAG, "方法3: 应用商店卸载Intent已发送");
+                        } catch (Exception e) {
+                            Log.e(TAG, "方法3失败: " + e.getMessage());
+                        }
+                    }
+                    
+                    // 最后尝试打开应用详情页面
+                    if (!success) {
+                        openAppDetails();
+                    }
                 } catch (Exception e) {
-                    Log.e(TAG, "备用卸载Intent启动失败", e);
-                    // 最后尝试跳转到应用详情页
+                    Log.e(TAG, "卸载应用时出错: " + e.getMessage());
                     openAppDetails();
                 }
-            }
-            
-            // 关闭菜单
-            dismiss();
+            }, 150); // 150ms延迟确保PopupWindow已经完全关闭
         } catch (Exception e) {
-            Log.e(TAG, "卸载应用失败: " + e.getMessage());
-            openAppDetails();
+            Log.e(TAG, "卸载启动失败: " + e.getMessage());
+            try {
+                openAppDetails();
+            } catch (Exception ex) {
+                Log.e(TAG, "打开应用详情也失败: " + ex.getMessage());
+            }
         }
     }
     
@@ -325,14 +400,19 @@ public class ShortcutMenuView {
     private void setupStandardButtons(LinearLayout shareButton, LinearLayout appInfoButton, LinearLayout uninstallButton) {
         // 分享按钮
         shareButton.setOnClickListener(v -> {
-            Intent sendIntent = new Intent();
-            sendIntent.setAction(Intent.ACTION_SEND);
-            sendIntent.putExtra(Intent.EXTRA_TEXT, 
-                    "Check out this app: " + appName + " - " + packageName);
-            sendIntent.setType("text/plain");
-            sendIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(Intent.createChooser(sendIntent, "分享应用"));
-            dismiss();
+            try {
+                Intent sendIntent = new Intent();
+                sendIntent.setAction(Intent.ACTION_SEND);
+                sendIntent.putExtra(Intent.EXTRA_TEXT, 
+                        "Check out this app: " + appName + " - " + packageName);
+                sendIntent.setType("text/plain");
+                sendIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(Intent.createChooser(sendIntent, "分享应用"));
+                dismiss();
+            } catch (Exception e) {
+                Log.e(TAG, "分享应用失败", e);
+                dismiss();
+            }
         });
         
         // 应用信息按钮
@@ -343,11 +423,21 @@ public class ShortcutMenuView {
         // 卸载按钮 - 系统应用不显示
         if (isSystemApp) {
             uninstallButton.setVisibility(View.GONE);
-        }
+        } else {
+            // 确保卸载按钮可见
+            uninstallButton.setVisibility(View.VISIBLE);
+            
+            // 增加日志输出以便调试
             uninstallButton.setOnClickListener(v -> {
-                uninstallApp();
+                Log.d(TAG, "卸载按钮被点击");
+                try {
+                    uninstallApp();
+                } catch (Exception e) {
+                    Log.e(TAG, "卸载应用失败: " + e.getMessage());
+                    dismiss();
+                }
             });
-
+        }
     }
     
     /**
@@ -356,14 +446,19 @@ public class ShortcutMenuView {
     private void setupRowButtons(LinearLayout shareRow, LinearLayout appInfoRow, LinearLayout uninstallRow) {
         // 分享按钮行
         shareRow.setOnClickListener(v -> {
-            Intent sendIntent = new Intent();
-            sendIntent.setAction(Intent.ACTION_SEND);
-            sendIntent.putExtra(Intent.EXTRA_TEXT, 
-                    "Check out this app: " + appName + " - " + packageName);
-            sendIntent.setType("text/plain");
-            sendIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(Intent.createChooser(sendIntent, "分享应用"));
-            dismiss();
+            try {
+                Intent sendIntent = new Intent();
+                sendIntent.setAction(Intent.ACTION_SEND);
+                sendIntent.putExtra(Intent.EXTRA_TEXT, 
+                        "Check out this app: " + appName + " - " + packageName);
+                sendIntent.setType("text/plain");
+                sendIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(Intent.createChooser(sendIntent, "分享应用"));
+                dismiss();
+            } catch (Exception e) {
+                Log.e(TAG, "分享应用失败", e);
+                dismiss();
+            }
         });
 
         // 应用信息按钮行
@@ -374,11 +469,21 @@ public class ShortcutMenuView {
         // 卸载按钮行 - 系统应用不显示
         if (isSystemApp) {
             uninstallRow.setVisibility(View.GONE);
-        }
+        } else {
+            // 确保卸载按钮行可见
+            uninstallRow.setVisibility(View.VISIBLE);
+            
+            // 增加日志输出以便调试
             uninstallRow.setOnClickListener(v -> {
-                uninstallApp();
+                Log.d(TAG, "卸载按钮行被点击");
+                try {
+                    uninstallApp();
+                } catch (Exception e) {
+                    Log.e(TAG, "卸载应用失败: " + e.getMessage());
+                    dismiss();
+                }
             });
-
+        }
     }
 
     private void updatePointerPosition(View anchor, int popupX, int popupY) {
@@ -461,7 +566,7 @@ public class ShortcutMenuView {
         // 保存锚点视图引用
         this.anchorView = anchor; // 保存原始锚点用于拖拽回调
         
-        // 确保应用保持全屏状态
+        // 确保应用保持全屏状态（仅调用一次）
         ensureFullScreenMode();
         
         // 测量PopupWindow大小
@@ -478,10 +583,6 @@ public class ShortcutMenuView {
         int[] centerCoords = ViewUtils.getViewCenterCoordinates(iconAnchor);
         int anchorCenterX = centerCoords[0];
         int anchorCenterY = centerCoords[1];
-        
-        Log.d(TAG, "图标信息: 位置=(" + location[0] + "," + location[1] + "), 尺寸=(" + 
-              iconAnchor.getWidth() + "," + iconAnchor.getHeight() + "), 中心=(" + 
-              anchorCenterX + "," + anchorCenterY + ")");
         
         // 计算X位置，使菜单居中显示在图标正上方/下方
         int x = anchorCenterX - popupWidth / 2;
@@ -503,40 +604,22 @@ public class ShortcutMenuView {
         final int finalX = x;
         final int finalY = y;
         final View finalIconAnchor = iconAnchor;
-        
-        // 强制设置特殊的PopupWindow标志，保持全屏模式
-        if (popupWindow.getContentView().getParent() != null) {
-            // 先关闭已存在的窗口
-            popupWindow.dismiss();
-        }
 
         try {
             // 使用FLAG_NOT_FOCUSABLE特性，避免获取焦点导致系统UI显示
             popupWindow.setFocusable(false);
             popupWindow.setTouchable(true);
             
-            // 设置输入法模式
-            popupWindow.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
-            
             // 显示PopupWindow
             popupWindow.showAtLocation(anchor, 0, finalX, finalY);
-            
-            // 记录日志显示弹窗位置信息
-            Log.d(TAG, "弹窗位置: (" + finalX + "," + finalY + "), 尺寸: (" + 
-                  popupWidth + "," + popupHeight + ")");
             
             // 在PopupWindow显示后更新指示器位置
             new Handler(Looper.getMainLooper()).post(() -> {
                 updatePointerPosition(finalIconAnchor, finalX, finalY);
+                
+                // 只在弹窗显示后确保一次全屏状态
+                ensureFullScreenMode();
             });
-            
-            // 强制刷新全屏状态
-            ensureFullScreenMode();
-            
-            // 使用多次重复的延迟任务，确保短时间内全屏状态不被破坏
-            for (int delay : new int[]{50, 100, 150, 200, 300, 500, 800}) {
-                new Handler(Looper.getMainLooper()).postDelayed(this::ensureFullScreenMode, delay);
-            }
         } catch (Exception e) {
             Log.e(TAG, "显示快捷菜单失败", e);
         }
@@ -544,15 +627,15 @@ public class ShortcutMenuView {
         // 应用进入动画
         CardView cardView = rootView.findViewById(R.id.shortcut_menu_card);
         if (cardView != null) {
-            cardView.setScaleX(0.8f);
-            cardView.setScaleY(0.8f);
+            cardView.setScaleX(0.9f); // 稍微调整初始缩放值
+            cardView.setScaleY(0.9f);
             cardView.setAlpha(0f);
             
             cardView.animate()
                     .scaleX(1.0f)
                     .scaleY(1.0f)
                     .alpha(1.0f)
-                    .setDuration(200)
+                    .setDuration(150) // 减少动画时间
                     .start();
         }
     }
@@ -582,28 +665,24 @@ public class ShortcutMenuView {
         if (context instanceof android.app.Activity) {
             android.app.Activity activity = (android.app.Activity) context;
             
-            // 设置窗口标志，强制全屏
-            activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN |
-                                          WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
-            
-            // 清除可能导致系统UI显示的标志
-            activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
-            
-            // 设置系统UI可见性 - 使用最完整的全屏标志组合
-            View decorView = activity.getWindow().getDecorView();
-            int uiOptions = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    | View.SYSTEM_UI_FLAG_LOW_PROFILE;
-            
-            // 强制更新UI可见性
-            decorView.setSystemUiVisibility(uiOptions);
-
-            // 记录日志
-            Log.d(TAG, "确保全屏模式 - 设置系统UI可见性标志");
+            try {
+                // 设置窗口标志，强制全屏
+                activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN |
+                                              WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+                
+                // 设置系统UI可见性 - 使用最完整的全屏标志组合
+                View decorView = activity.getWindow().getDecorView();
+                int uiOptions = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+                
+                decorView.setSystemUiVisibility(uiOptions);
+            } catch (Exception e) {
+                Log.e(TAG, "全屏模式设置失败", e);
+            }
         }
     }
 } 

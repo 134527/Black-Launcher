@@ -4,9 +4,13 @@ import android.app.WallpaperManager;
 import android.appwidget.AppWidgetHost;
 import android.appwidget.AppWidgetManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
+import android.content.res.Configuration;
+import android.database.ContentObserver;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -14,12 +18,16 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.preference.PreferenceManager;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.widget.Button;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
@@ -41,6 +49,7 @@ import com.msk.blacklauncher.fragments.ChecklistAndNotesFragment;
 import com.msk.blacklauncher.fragments.HomeFragment;
 import com.msk.blacklauncher.fragments.WorkspaceFragment;
 import com.msk.blacklauncher.model.AppModel;
+import com.msk.blacklauncher.service.IdleModeService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -58,6 +67,10 @@ public class MainActivity extends AppCompatActivity {
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable hideSystemUIRunnable = this::hideSystemUI;
     
+    // 屏幕旋转内容观察者
+    private ContentObserver rotationObserver;
+    private int lastKnownOrientation = Configuration.ORIENTATION_UNDEFINED;
+    
     // 记录当前主页面位置
     private int currentMainPage = 0;
 
@@ -69,6 +82,15 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // 禁用系统字体缩放
+        getResources().getConfiguration().fontScale = 1.0f;
+        getResources().getDisplayMetrics().scaledDensity = getResources().getDisplayMetrics().density;
+        
+        // 记录当前方向
+        lastKnownOrientation = getResources().getConfiguration().orientation;
+        Log.d(TAG, "onCreate: 当前屏幕方向 = " + 
+              (lastKnownOrientation == Configuration.ORIENTATION_LANDSCAPE ? "横屏" : "竖屏"));
+        
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         FullScreenHelper.setFullScreen(this);
@@ -220,6 +242,14 @@ public class MainActivity extends AppCompatActivity {
         for (int delay : RECURSIVE_DELAYS) {
             uiHandler.postDelayed(this::hideSystemUI, delay);
         }
+
+        // 启动空闲模式服务
+        Intent idleModeServiceIntent = new Intent(this, IdleModeService.class);
+        startService(idleModeServiceIntent);
+        Log.d(TAG, "启动空闲模式服务");
+
+        // 注册屏幕旋转内容观察者
+        registerRotationObserver();
     }
 
     private void setupViewPager(ViewPager2 viewPager, ViewPagerAdapter adapter, List<AppModel> appsList) {
@@ -308,6 +338,56 @@ public class MainActivity extends AppCompatActivity {
         return super.dispatchTouchEvent(ev);
     }
     
+    @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        int currentOrientation = newConfig.orientation;
+        
+        Log.d(TAG, "配置变更: " + (currentOrientation == Configuration.ORIENTATION_LANDSCAPE ? "横屏" : "竖屏"));
+        
+        // 确保保持全屏状态
+        hideSystemUI();
+        
+        // 将配置变更事件传递给当前可见的Fragment
+        if (viewPager != null) {
+            int currentPosition = viewPager.getCurrentItem();
+            Fragment currentFragment = getSupportFragmentManager().findFragmentByTag("f" + currentPosition);
+            
+            // 如果当前Fragment是HomeFragment，则通知它配置已经变更
+            if (currentFragment instanceof HomeFragment) {
+                Log.d(TAG, "将配置变更传递给HomeFragment");
+                ((HomeFragment) currentFragment).onConfigurationChanged(newConfig);
+                
+                // 强制重新加载Fragment以应用新布局
+                forceRefreshCurrentFragment();
+            }
+        }
+    }
+    
+    /**
+     * 强制刷新当前Fragment
+     */
+    private void forceRefreshCurrentFragment() {
+        if (viewPager == null) return;
+        
+        try {
+            int currentPosition = viewPager.getCurrentItem();
+            Fragment currentFragment = getSupportFragmentManager().findFragmentByTag("f" + currentPosition);
+            
+            if (currentFragment != null) {
+                Log.d(TAG, "强制刷新当前Fragment: " + currentFragment.getClass().getSimpleName());
+                
+                // 使用FragmentTransaction重新附加Fragment，触发重建
+                FragmentTransaction ft = getSupportFragmentManager().beginTransaction();
+                ft.detach(currentFragment);
+                ft.attach(currentFragment);
+                ft.commitAllowingStateLoss();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "强制刷新Fragment失败", e);
+        }
+    }
+
     /**
      * 强制隐藏系统UI，实现沉浸式全屏体验
      */
@@ -401,5 +481,57 @@ public class MainActivity extends AppCompatActivity {
         FragmentTransaction transaction = fragmentManager.beginTransaction();
         transaction.replace(R.id.viewPager, new WorkspaceFragment());
         transaction.commit();
+    }
+
+    /**
+     * 注册屏幕旋转内容观察者，用于监测通过adb等方式旋转屏幕
+     */
+    private void registerRotationObserver() {
+        rotationObserver = new ContentObserver(uiHandler) {
+            @Override
+            public void onChange(boolean selfChange) {
+                try {
+                    // 获取当前系统旋转设置
+                    int userRotation = Settings.System.getInt(getContentResolver(), "user_rotation");
+                    int currentOrientation = getResources().getConfiguration().orientation;
+                    
+                    Log.d(TAG, "系统旋转值变化：user_rotation = " + userRotation + 
+                          ", 当前方向 = " + (currentOrientation == Configuration.ORIENTATION_LANDSCAPE ? 
+                                           "横屏" : "竖屏"));
+                    
+                    // 如果设备当前配置的方向与上次不同，手动触发配置变更
+                    if (currentOrientation != lastKnownOrientation) {
+                        Log.d(TAG, "检测到屏幕方向变化，触发配置变更处理");
+                        lastKnownOrientation = currentOrientation;
+                        
+                        // 延迟一点时间确保系统已完成旋转
+                        uiHandler.postDelayed(() -> {
+                            Configuration newConfig = new Configuration(getResources().getConfiguration());
+                            onConfigurationChanged(newConfig);
+                        }, 200);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "处理屏幕旋转变化时出错", e);
+                }
+            }
+        };
+        
+        // 注册内容观察者，监听系统旋转设置变化
+        getContentResolver().registerContentObserver(
+                Settings.System.getUriFor("user_rotation"), 
+                false, rotationObserver);
+        
+        Log.d(TAG, "已注册屏幕旋转内容观察者");
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        
+        // 取消注册屏幕旋转观察者
+        if (rotationObserver != null) {
+            getContentResolver().unregisterContentObserver(rotationObserver);
+            rotationObserver = null;
+        }
     }
 }

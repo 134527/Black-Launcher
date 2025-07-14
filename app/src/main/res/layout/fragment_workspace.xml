@@ -38,25 +38,23 @@
     <!-- 工作区ViewPager -->
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/workspace_pager"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:layout_marginBottom="8dp"
-        app:layout_constraintStart_toStartOf="@id/guidelineStart"
-        app:layout_constraintEnd_toEndOf="@id/guidelineEnd"
-        app:layout_constraintTop_toTopOf="@id/guidelineBottom"
+     android:padding="180px"
         app:layout_constraintBottom_toTopOf="@+id/guidelineTop"
         android:background="@android:color/transparent" />
 
     <!-- 添加页面指示器 -->
     <com.msk.blacklauncher.view.PageIndicator
         android:id="@+id/page_indicator"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="48dp"
         android:layout_marginBottom="16dp"
         android:minHeight="48dp"
         android:layout_marginTop="8dp"
-        app:layout_constraintStart_toStartOf="@id/guidelineStart"
-        app:layout_constraintEnd_toEndOf="@id/guidelineEnd"
+        android:layout_marginLeft="180px"
+
         app:layout_constraintTop_toTopOf="@id/guidelineTop"
         app:dotRadius="6dp"
         app:dotSpacing="8dp"

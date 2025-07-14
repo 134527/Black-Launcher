@@ -1,5 +1,9 @@
 package com.msk.blacklauncher.fragments;
 
+
+import static android.content.ContentValues.TAG;
+
+import com.msk.blacklauncher.activities.screensaver.ScreensaverActivity;
 import  com.msk.blacklauncher.utils.FullScreenHelper;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -11,13 +15,16 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.ContextThemeWrapper;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -25,6 +32,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.GridLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -32,6 +40,7 @@ import android.widget.LinearLayout;
 import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.graphics.Typeface;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -43,7 +52,7 @@ import com.msk.blacklauncher.R;
 import com.msk.blacklauncher.SettingsActivity;
 import com.msk.blacklauncher.utils.AppLayoutManager;
 import com.msk.blacklauncher.utils.IconUtils;
-import com.msk.blacklauncher.activities.ScreensaverActivity;
+import com.msk.blacklauncher.utils.PinyinUtils;
 import com.msk.blacklauncher.model.AppModel;
 import com.msk.blacklauncher.view.CardTouchInterceptor;
 
@@ -77,6 +86,7 @@ public class HomeFragment extends Fragment {
     private com.msk.blacklauncher.view.PageIndicator pageIndicator;
     private ViewPager2 mainViewPager;
     private ViewPager2.OnPageChangeCallback pageChangeCallback;
+    private int currentOrientation = Configuration.ORIENTATION_UNDEFINED;
 
     private LinearLayout basicToolsGrid;
     private GridLayout settingsGrid;
@@ -95,10 +105,30 @@ public class HomeFragment extends Fragment {
     private Dialog currentBlurBackgroundDialog = null;
     private Dialog currentAppPickerDialog = null;
     private Dialog currentPickerBlurDialog = null;
+    private Dialog currentAppDrawerDialog = null;
+    private Dialog currentAppDrawerBlurDialog = null;
+    
+    @Override
+    public void onCreate(@Nullable Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        // 设置Fragment在配置变更时保留实例，避免重新创建
+        setRetainInstance(true);
+    }
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
-        view = inflater.inflate(R.layout.fragment_home, container, false);
+        // 禁用系统字体大小和显示大小缩放
+        Context contextThemeWrapper = new ContextThemeWrapper(getActivity(), R.style.Theme_BlackLauncher);
+        contextThemeWrapper.getResources().getConfiguration().fontScale = 1.0f;
+        LayoutInflater localInflater = inflater.cloneInContext(contextThemeWrapper);
+        
+        // 检测当前屏幕方向并加载相应布局
+        currentOrientation = getResources().getConfiguration().orientation;
+        int layoutResId = (currentOrientation == Configuration.ORIENTATION_LANDSCAPE) ? 
+                         R.layout.fragment_home : 
+                         R.layout.fragment_home_portrait;
+        
+        view = localInflater.inflate(layoutResId, container, false);
         
         // 初始化ViewPager2
         mainViewPager = requireActivity().findViewById(R.id.viewPager);
@@ -146,6 +176,81 @@ public class HomeFragment extends Fragment {
             return true;
         });
         return view;
+    }
+
+    @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        
+        // 只有当方向发生变化时才重新加载UI
+        if (currentOrientation != newConfig.orientation) {
+            currentOrientation = newConfig.orientation;
+            Log.d("HomeFragment", "屏幕方向改变，重新加载UI: " + 
+                  (currentOrientation == Configuration.ORIENTATION_LANDSCAPE ? "横屏" : "竖屏"));
+            
+            // 关闭所有打开的对话框
+            closeAllDialogs();
+            
+            // 直接替换根视图而不是重新加载整个Fragment
+            ViewGroup parent = (ViewGroup) view.getParent();
+            if (parent != null && getActivity() != null) {
+                int index = parent.indexOfChild(view);
+                parent.removeView(view);
+                
+                // 创建新的视图
+                Context contextThemeWrapper = new ContextThemeWrapper(getActivity(), R.style.Theme_BlackLauncher);
+                contextThemeWrapper.getResources().getConfiguration().fontScale = 1.0f;
+                LayoutInflater localInflater = LayoutInflater.from(getActivity()).cloneInContext(contextThemeWrapper);
+                
+                // 根据当前方向选择布局
+                int layoutResId = (currentOrientation == Configuration.ORIENTATION_LANDSCAPE) ? 
+                                 R.layout.fragment_home : 
+                                 R.layout.fragment_home_portrait;
+                
+                View newView = localInflater.inflate(layoutResId, parent, false);
+                parent.addView(newView, index);
+                view = newView;
+                
+                // 重新初始化视图和组件
+                timeTextView = view.findViewById(R.id.timerText);
+                dateTextView = view.findViewById(R.id.dateText);
+                initViews(view);
+                loadSavedAppsToGrids();
+                fixMissingTags();
+                updateDateTime();
+                
+                // 更新页面指示器
+                pageIndicator = view.findViewById(R.id.home_page_indicator);
+                initPageIndicator();
+                
+                Log.d("HomeFragment", "视图已重新加载，适应" + 
+                      (currentOrientation == Configuration.ORIENTATION_LANDSCAPE ? "横屏" : "竖屏") + "布局");
+            } else {
+                Log.e("HomeFragment", "无法重新加载视图，父视图为null或Activity已销毁");
+                // 尝试使用Fragment事务重新加载
+                reloadUI();
+            }
+        }
+    }
+    
+    private void reloadUI() {
+        if (!isAdded() || getActivity() == null) return;
+        
+        try {
+            // 保存当前状态
+            Bundle state = new Bundle();
+            // 这里可以保存任何需要在重建UI后恢复的状态
+            
+            // 使用FragmentTransaction替换当前Fragment
+            getParentFragmentManager().beginTransaction()
+                .detach(this)
+                .attach(this)
+                .commit();
+            
+            Log.d("HomeFragment", "UI已重新加载，适应新的屏幕方向");
+        } catch (Exception e) {
+            Log.e("HomeFragment", "重新加载UI失败: " + e.getMessage());
+        }
     }
 
     private void fixMissingTags() {
@@ -270,6 +375,15 @@ public class HomeFragment extends Fragment {
 
         categorizeAndDisplayApps();
         setupClickListeners(); // 初始化点击监听器
+
+        // 设置屏保卡片点击事件
+        screensaverCard.setOnClickListener(v -> {
+            Log.d(TAG, "点击屏保卡片");
+            
+            // 启动屏保活动
+            Intent intent = new Intent(getActivity(), ScreensaverActivity.class);
+            startActivity(intent);
+        });
     }
 
     // 初始化所有卡片的模糊效果
@@ -288,6 +402,8 @@ public class HomeFragment extends Fragment {
         
         // 初始化基础工具卡片的模糊效果
         initBlurView(view, rootView, R.id.tools_card_blur_view, radius);
+        initBlurView(view, rootView, R.id.screensaverCard_portrait, radius);
+        initBlurView(view, rootView, R.id.themeCard_portrait, radius);
         
         // 初始化基础设置卡片的模糊效果
         initBlurView(view, rootView, R.id.settings_card_blur_view, radius);
@@ -394,6 +510,7 @@ public class HomeFragment extends Fragment {
     public void onResume() {
         super.onResume();
         refreshAllGrids(); // 每次回到前台都刷新一次
+        updateAppDrawerIfShowing(); // 如果应用抽屉正在显示，刷新其内容
     }
 
     // 从包名获取应用模型
@@ -411,6 +528,7 @@ public class HomeFragment extends Fragment {
         }
     }
 
+    
     // 添加应用到网格，并设置长按删除功能
     private void addAppToGrid(AppModel app, GridLayout grid, String cardKey) {
         View appView = createAppIconView(app);
@@ -438,7 +556,8 @@ public class HomeFragment extends Fragment {
         GridLayout.LayoutParams params = new GridLayout.LayoutParams();
         params.width = GridLayout.LayoutParams.WRAP_CONTENT;
         params.height = GridLayout.LayoutParams.WRAP_CONTENT;
-        params.setMargins(16,16,16,16);
+
+        params.setMargins(16, 13, 13, 10);
 
         // 添加到网格
         appView.setLayoutParams(params);
@@ -565,30 +684,7 @@ public class HomeFragment extends Fragment {
     private void setupClickListeners() {
         // 设置搜索按钮点击事件
         searchButton.setOnClickListener(v -> {
-            // 创建启动搜索的 Intent
-            Intent intent = new Intent(Intent.ACTION_SEARCH_LONG_PRESS);
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-            try {
-                // 尝试调用系统搜索
-                startActivity(intent);
-            } catch (Exception e) {
-                // 如果系统搜索不可用，尝试使用 Google 搜索
-                try {
-                    intent = new Intent("com.google.android.googlequicksearchbox.GOOGLE_SEARCH");
-                    intent.setPackage("com.google.android.googlequicksearchbox");
-                    startActivity(intent);
-                } catch (Exception e2) {
-                    // 如果 Google 搜索也不可用，尝试使用全局搜索
-                    try {
-                        intent = new Intent(Intent.ACTION_ASSIST);
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        startActivity(intent);
-                    } catch (Exception e3) {
-                        Toast.makeText(requireContext(), "未找到可用的搜索应用", Toast.LENGTH_SHORT).show();
-                    }
-                }
-            }
+            showAppDrawerDialog();
         });
 
         tvModeCard.setOnClickListener(v -> handleCardClick(v, this::launchTVModeDialog));
@@ -642,7 +738,7 @@ public class HomeFragment extends Fragment {
     }
 
     private void launchTVModeDialog() {
-        new AlertDialog.Builder(getContext(), R.style.CustomAlertDialog)
+        new AlertDialog.Builder(getContext(), R.style.AppDrawer_CustomAlertDialog)
                 .setTitle("启用TV模式")
                 .setMessage("是否启用TV模式？")
                 .setPositiveButton("是", (dialog, which) -> launchTVMode())
@@ -756,11 +852,11 @@ public class HomeFragment extends Fragment {
                 "com.android.settings"        // 设置
             };
 
-            // 先给容器设置内边距，确保与标签对齐
-            basicToolsLayout.setPadding(0, 0, 0, 0);
+
             
             // 设置均等间距
             basicToolsLayout.setWeightSum(defaultTools.length);
+
             
             // 确保LinearLayout有足够高度显示图标和文字
             ViewGroup.LayoutParams layoutParams = basicToolsLayout.getLayoutParams();
@@ -782,8 +878,10 @@ public class HomeFragment extends Fragment {
                             0, 
                             ViewGroup.LayoutParams.WRAP_CONTENT);
                     containerParams.weight = 1;
-                    containerParams.leftMargin = 16;
-                    containerParams.rightMargin = 16;
+                    containerParams.gravity = 1;
+
+                    containerParams.leftMargin = 8;
+                    containerParams.rightMargin = 8;
 
 
                     
@@ -791,7 +889,7 @@ public class HomeFragment extends Fragment {
 
                     // 设置图标大小
                     ImageView appIcon = new ImageView(requireContext());
-                    LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(140, 140);
+                    LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(120, 120);
                     iconParams.gravity = Gravity.CENTER_HORIZONTAL;
                     appIcon.setLayoutParams(iconParams);
                     appIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -936,9 +1034,21 @@ public class HomeFragment extends Fragment {
         @Override
         public void onReceive(Context context, Intent intent) {
             if (intent != null && (Intent.ACTION_PACKAGE_ADDED.equals(intent.getAction()) ||
-                    Intent.ACTION_PACKAGE_REMOVED.equals(intent.getAction()))) {
+                    Intent.ACTION_PACKAGE_REMOVED.equals(intent.getAction()) ||
+                    Intent.ACTION_PACKAGE_REPLACED.equals(intent.getAction()) ||
+                    Intent.ACTION_PACKAGE_CHANGED.equals(intent.getAction()))) {
+                
                 // 应用安装或卸载后，刷新应用列表
                 categorizeAndDisplayApps();
+                
+                // 如果应用抽屉正在显示，更新其内容
+                updateAppDrawerIfShowing();
+                
+                // 记录变更
+                String action = intent.getAction();
+                Uri data = intent.getData();
+                String packageName = data != null ? data.getSchemeSpecificPart() : null;
+                Log.d("HomeFragment", "应用变更: " + action + ", 包名: " + packageName);
             }
         }
     }
@@ -959,7 +1069,7 @@ public class HomeFragment extends Fragment {
 
 
     private void launchTVMode() {
-        new AlertDialog.Builder(getContext(), R.style.CustomAlertDialog) .setMessage("TV模式正在开发？").show();
+        new AlertDialog.Builder(getContext(), R.style.AppDrawer_CustomAlertDialog) .setMessage("TV模式正在开发？").show();
     }
 
     private void openThemeSettings() {
@@ -1056,8 +1166,8 @@ public class HomeFragment extends Fragment {
 
             // 设置对话框大小和位置
             WindowManager.LayoutParams params = window.getAttributes();
-            params.width = 1440; // 固定宽度
-            params.height = 810; // 固定高度
+            params.width =  dpToPx(840); // 固定宽度
+            params.height = dpToPx(500); // 固定高度
             params.gravity = Gravity.CENTER; // 居中显示
             window.setAttributes(params);
             
@@ -1154,7 +1264,7 @@ public class HomeFragment extends Fragment {
                     GridLayout.LayoutParams params = new GridLayout.LayoutParams();
                     params.width = GridLayout.LayoutParams.WRAP_CONTENT;
                     params.height = GridLayout.LayoutParams.WRAP_CONTENT;
-                    params.setMargins(32, 32, 32, 32);
+                    params.setMargins(16, 24, 16, 24);
                     // 设置填充行为，使图标均匀分布在5列网格中
                     params.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
                     params.rowSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f);
@@ -1390,8 +1500,8 @@ public class HomeFragment extends Fragment {
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             WindowManager.LayoutParams params = window.getAttributes();
-            params.width = 1440;
-            params.height = 810;
+            params.width =  dpToPx(840); // 固定宽度
+            params.height = dpToPx(580); // 固定高度
             params.gravity = Gravity.CENTER;
             window.setAttributes(params);
             
@@ -1695,6 +1805,16 @@ public class HomeFragment extends Fragment {
                 currentPickerBlurDialog.dismiss();
                 currentPickerBlurDialog = null;
             }
+            
+            if (currentAppDrawerDialog != null && currentAppDrawerDialog.isShowing()) {
+                currentAppDrawerDialog.dismiss();
+                currentAppDrawerDialog = null;
+            }
+            
+            if (currentAppDrawerBlurDialog != null && currentAppDrawerBlurDialog.isShowing()) {
+                currentAppDrawerBlurDialog.dismiss();
+                currentAppDrawerBlurDialog = null;
+            }
         } catch (Exception e) {
             Log.e("HomeFragment", "关闭对话框出错: " + e.getMessage());
         }
@@ -1705,9 +1825,15 @@ public class HomeFragment extends Fragment {
             return;
         }
 
-        // 手动设置页面指示器 - 总共2页，当前是第0页（索引从0开始）
-        Log.d("HomeFragment", "设置全局页面指示器: 总页数=2, 当前页=0");
-        pageIndicator.setupManually(2, 0); // 总共2页，当前是第一页(索引0)
+        // 如果有ViewPager2，直接关联
+        if (mainViewPager != null) {
+            Log.d("HomeFragment", "将页面指示器关联到ViewPager2");
+            pageIndicator.setupWithViewPager(mainViewPager);
+        } else {
+            // 如果没有ViewPager2，则手动设置
+            Log.d("HomeFragment", "手动设置页面指示器: 总页数=2, 当前页=0");
+            pageIndicator.setupManually(2, 0); // 总共2页，当前是第一页(索引0)
+        }
     }
 
     /**
@@ -1717,7 +1843,446 @@ public class HomeFragment extends Fragment {
     public void updatePageIndicator(int currentPage) {
         if (pageIndicator != null) {
             Log.d("HomeFragment", "更新页面指示器位置: " + currentPage);
+            // 当ViewPager2关联时，这个方法可以不调用，因为PageIndicator会自动更新
+            // 但为了向后兼容，我们保留此方法
             pageIndicator.setCurrentPage(currentPage);
         }
+    }
+
+    private void showAppDrawerDialog() {
+        // 关闭任何已存在的对话框
+        closeAllDialogs();
+        
+        // 创建全屏模糊背景
+        Dialog blurBackgroundDialog = new Dialog(requireContext(), R.style.AppDrawer_BlurBackgroundDialog);
+        blurBackgroundDialog.setContentView(R.layout.dialog_blur_background);
+        blurBackgroundDialog.setCancelable(true);
+        
+        // 保存为当前模糊背景对话框
+        currentAppDrawerBlurDialog = blurBackgroundDialog;
+        
+        // 设置全屏
+        Window blurWindow = blurBackgroundDialog.getWindow();
+        if (blurWindow != null) {
+            blurWindow.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
+            blurWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            
+            // 确保状态栏和导航栏不可见
+            int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+            blurWindow.getDecorView().setSystemUiVisibility(flags);
+        }
+        
+        // 初始化背景模糊效果
+        eightbitlab.com.blurview.BlurView backgroundBlurView = blurBackgroundDialog.findViewById(R.id.background_blur_view);
+        ViewGroup rootView = (ViewGroup) requireActivity().getWindow().getDecorView().findViewById(android.R.id.content);
+        if (backgroundBlurView != null && rootView != null) {
+            backgroundBlurView.setupWith(rootView)
+                .setBlurRadius(20f)
+                .setBlurAutoUpdate(true)
+                .setOverlayColor(Color.parseColor("#33000000"));
+        }
+        
+        // 显示模糊背景
+        blurBackgroundDialog.show();
+        
+        // 创建应用抽屉对话框
+        Dialog dialog = new Dialog(requireContext(), R.style.AppDrawer_DialogOverBlurredBackground);
+        
+        // 保存为当前应用抽屉对话框
+        currentAppDrawerDialog = dialog;
+        
+        dialog.setContentView(R.layout.dialog_app_drawer);
+        FullScreenHelper.setFullScreenDialog(dialog);
+        
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+
+            // 设置对话框从底部上拉出现的动画
+            window.setGravity(Gravity.BOTTOM);
+            window.setWindowAnimations(R.style.AppDrawerAnimation);
+            
+            // 设置对话框大小为全屏
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.width = WindowManager.LayoutParams.MATCH_PARENT;
+            params.height = WindowManager.LayoutParams.MATCH_PARENT;
+            window.setAttributes(params);
+            
+            // 确保状态栏和导航栏不可见
+            int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+            window.getDecorView().setSystemUiVisibility(flags);
+        }
+        
+        // 获取搜索框和应用网格视图
+        EditText searchEditText = dialog.findViewById(R.id.app_drawer_search);
+        GridLayout appDrawerGrid = dialog.findViewById(R.id.app_drawer_grid);
+        
+        // 初始化应用抽屉内的模糊视图
+        eightbitlab.com.blurview.BlurView drawerBlurView = dialog.findViewById(R.id.app_drawer_blur_view);
+        if (drawerBlurView != null && rootView != null) {
+            drawerBlurView.setupWith(rootView)
+                .setBlurRadius(20f)
+                .setBlurAutoUpdate(true)
+                .setOverlayColor(Color.parseColor("#33000000"));
+        }
+        
+        // 设置网格为9列
+        appDrawerGrid.setColumnCount(9);
+        appDrawerGrid.setRowCount(5);
+        
+        // 加载所有应用并显示在网格中
+        loadAppsToAppDrawer(appDrawerGrid, searchEditText);
+        
+        // 设置对话框关闭监听器，同时关闭模糊背景
+        dialog.setOnDismissListener(dialogInterface -> {
+            // 关闭模糊背景
+            if (blurBackgroundDialog != null && blurBackgroundDialog.isShowing()) {
+                try {
+                    blurBackgroundDialog.dismiss();
+                } catch (Exception e) {
+                    Log.e("HomeFragment", "关闭模糊背景错误: " + e.getMessage());
+                }
+            }
+            
+            // 清除引用
+            currentAppDrawerDialog = null;
+            currentAppDrawerBlurDialog = null;
+            
+            // 确保对话框关闭后应用仍然保持全屏状态
+            FullScreenHelper.setImmersiveSticky(requireActivity());
+        });
+        
+        // 设置搜索框回车键监听
+        searchEditText.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                // 隐藏软键盘
+                android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager) 
+                        requireActivity().getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (imm != null) {
+                    imm.hideSoftInputFromWindow(searchEditText.getWindowToken(), 0);
+                }
+                return true;
+            }
+            return false;
+        });
+        
+        dialog.show();
+        
+        // 在对话框显示后再次确保全屏状态
+        if (window != null) {
+            // 确保状态栏和导航栏不可见
+            int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+            window.getDecorView().setSystemUiVisibility(flags);
+        }
+        FullScreenHelper.setImmersiveSticky(requireActivity());
+        
+        // 记录日志
+        Log.d("HomeFragment", "应用抽屉已打开，共加载 " + 
+              (allAppDrawerItems != null ? allAppDrawerItems.size() : 0) + " 个应用");
+    }
+
+    private void loadAppsToAppDrawer(GridLayout grid, EditText searchEditText) {
+        // 获取所有已安装的应用
+        PackageManager pm = requireActivity().getPackageManager();
+        Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
+        mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> resolveInfos = pm.queryIntentActivities(mainIntent, 0);
+        
+        // 创建应用信息列表
+        List<AppDrawerItem> appList = new ArrayList<>();
+        
+        for (ResolveInfo resolveInfo : resolveInfos) {
+            try {
+                String packageName = resolveInfo.activityInfo.packageName;
+                String appName = resolveInfo.loadLabel(pm).toString();
+                Drawable appIcon = resolveInfo.loadIcon(pm);
+                
+                // 生成拼音首字母，用于搜索
+                String pinyinFirstLetters = PinyinUtils.getFirstLetters(appName);
+                
+                appList.add(new AppDrawerItem(appName, appIcon, packageName, pinyinFirstLetters));
+            } catch (Exception e) {
+                Log.e("HomeFragment", "获取应用信息失败: " + e.getMessage());
+            }
+        }
+        
+        // 按应用名称排序
+        appList.sort((app1, app2) -> app1.appName.compareToIgnoreCase(app2.appName));
+        
+        // 获取当前搜索文本，用于筛选应用
+        String searchText = searchEditText.getText().toString().toLowerCase().trim();
+        List<AppDrawerItem> filteredApps;
+        
+        if (TextUtils.isEmpty(searchText)) {
+            // 搜索框为空，显示所有应用
+            filteredApps = appList;
+        } else {
+            // 筛选匹配搜索文本的应用（包括拼音首字母）
+            filteredApps = new ArrayList<>();
+            for (AppDrawerItem app : appList) {
+                // 检查应用名
+                String appNameLower = app.appName.toLowerCase();
+                // 检查应用名拼音首字母
+                String pinyinLower = app.pinyinFirstLetters.toLowerCase();
+                
+                // 修改搜索匹配逻辑
+                boolean matched = false;
+                if (searchText.matches("[a-zA-Z]+")) {
+                    // 对于英文搜索，仅匹配应用名起始字母或拼音首字母
+                    if (appNameLower.startsWith(searchText)) {
+                        matched = true;
+                    } else if (pinyinLower.length() > 0) {
+                        // 对于拼音首字母，确保不是简单地包含搜索字符
+                        // 而是必须以搜索文本开头或者是单词的开头
+                        String[] words = pinyinLower.split("[^a-zA-Z0-9]");
+                        for (String word : words) {
+                            if (word.startsWith(searchText)) {
+                                matched = true;
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    // 对于非拉丁字母输入，使用包含匹配
+                    matched = appNameLower.contains(searchText) || 
+                             pinyinLower.contains(searchText);
+                }
+                
+                if (matched) {
+                    filteredApps.add(app);
+                }
+            }
+        }
+        
+        // 显示过滤后的应用
+        displayAppsInDrawer(grid, filteredApps);
+        
+        // 搜索监听器仅在首次加载时设置，避免重复设置
+        if (searchEditText.getTag() == null) {
+            searchEditText.addTextChangedListener(new android.text.TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {}
+                
+                @Override
+                public void afterTextChanged(android.text.Editable s) {
+                    String searchText = s.toString().toLowerCase().trim();
+                    
+                    if (searchText.isEmpty()) {
+                        // 如果搜索框为空，显示所有应用
+                        displayAppsInDrawer(grid, appList);
+                    } else {
+                        // 按首字母匹配筛选应用（包括拼音首字母）
+                        List<AppDrawerItem> filteredApps = new ArrayList<>();
+                        
+                        for (AppDrawerItem app : appList) {
+                            String appNameLower = app.appName.toLowerCase();
+                            String pinyinLower = app.pinyinFirstLetters.toLowerCase();
+                            
+                            // 修改搜索匹配逻辑
+                            // 1. 如果输入的是拉丁字母，则优先匹配应用名的起始字符
+                            boolean matched = false;
+                            if (searchText.matches("[a-zA-Z]+")) {
+                                // 对于英文搜索，仅匹配应用名起始字母或拼音首字母
+                                if (appNameLower.startsWith(searchText)) {
+                                    matched = true;
+                                } else if (pinyinLower.length() > 0) {
+                                    // 对于拼音首字母，确保不是简单地包含搜索字符
+                                    // 而是必须以搜索文本开头或者是单词的开头
+                                    String[] words = pinyinLower.split("[^a-zA-Z0-9]");
+                                    for (String word : words) {
+                                        if (word.startsWith(searchText)) {
+                                            matched = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            } else {
+                                // 对于非拉丁字母输入，使用包含匹配
+                                matched = appNameLower.contains(searchText) || 
+                                         pinyinLower.contains(searchText);
+                            }
+                            
+                            if (matched) {
+                                filteredApps.add(app);
+                            }
+                        }
+                        
+                        displayAppsInDrawer(grid, filteredApps);
+                    }
+                }
+            });
+            
+            // 标记为已设置监听器
+            searchEditText.setTag("listener_set");
+        }
+        
+        // 保存应用列表到Fragment实例变量，方便后续使用
+        allAppDrawerItems = appList;
+    }
+    
+    // 应用抽屉项数据类
+    private static class AppDrawerItem {
+        String appName;
+        Drawable appIcon;
+        String packageName;
+        String pinyinFirstLetters; // 拼音首字母，用于搜索
+        
+        AppDrawerItem(String appName, Drawable appIcon, String packageName) {
+            this(appName, appIcon, packageName, "");
+        }
+        
+        AppDrawerItem(String appName, Drawable appIcon, String packageName, String pinyinFirstLetters) {
+            this.appName = appName;
+            this.appIcon = appIcon;
+            this.packageName = packageName;
+            this.pinyinFirstLetters = pinyinFirstLetters;
+        }
+    }
+
+    /**
+     * 如果应用抽屉正在显示，更新其内容
+     */
+    private void updateAppDrawerIfShowing() {
+        // 检查应用抽屉对话框是否存在且正在显示
+        if (currentAppDrawerDialog != null && currentAppDrawerDialog.isShowing()) {
+            try {
+                // 获取对话框中的应用网格和搜索框
+                GridLayout appDrawerGrid = currentAppDrawerDialog.findViewById(R.id.app_drawer_grid);
+                EditText searchEditText = currentAppDrawerDialog.findViewById(R.id.app_drawer_search);
+                
+                if (appDrawerGrid != null && searchEditText != null) {
+                    // 获取当前搜索框内容
+                    String currentSearchText = searchEditText.getText().toString();
+                    
+                    // 重新加载应用列表
+                    loadAppsToAppDrawer(appDrawerGrid, searchEditText);
+                    
+                    // 保持之前的搜索内容
+                    if (!TextUtils.isEmpty(currentSearchText)) {
+                        searchEditText.setText(currentSearchText);
+                    }
+                    
+                    Log.d("HomeFragment", "应用抽屉内容已更新");
+                }
+            } catch (Exception e) {
+                Log.e("HomeFragment", "更新应用抽屉内容失败: " + e.getMessage());
+            }
+        }
+    }
+
+    // 用于存储所有应用的列表
+    private List<AppDrawerItem> allAppDrawerItems;
+    
+    private void displayAppsInDrawer(GridLayout grid, List<AppDrawerItem> apps) {
+        // 清空网格
+        grid.removeAllViews();
+        
+        // 获取PackageManager
+        PackageManager pm = requireActivity().getPackageManager();
+        
+        // 计算合适的应用图标尺寸
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int screenHeight = getResources().getDisplayMetrics().heightPixels - 200; // 考虑搜索栏高度
+        
+        int columnCount = 9;
+        int rowCount = 5;
+        
+        int iconSize = Math.min(screenWidth / (columnCount + 1), screenHeight / (rowCount + 1));
+        iconSize = Math.min(iconSize, 120); // 设置最大尺寸
+        
+        // 计算每个单元格的宽高，确保均匀分布
+        int cellWidth = screenWidth / columnCount;
+        int cellHeight = screenHeight / rowCount;
+        
+        // 添加应用到网格，确保均匀分布
+        for (int i = 0; i < Math.min(apps.size(), rowCount * columnCount); i++) {
+            AppDrawerItem app = apps.get(i);
+            
+            // 计算当前项应该在的行和列
+            int row = i / columnCount;
+            int col = i % columnCount;
+            
+            // 创建应用图标视图
+            LinearLayout appContainer = new LinearLayout(requireContext());
+            appContainer.setOrientation(LinearLayout.VERTICAL);
+            appContainer.setGravity(Gravity.CENTER);
+            
+            // 设置布局参数，按照计算好的单元格尺寸均匀分布
+            GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+            params.width = cellWidth;
+            params.height = cellHeight;
+            params.rowSpec = GridLayout.spec(row, 1, GridLayout.FILL);
+            params.columnSpec = GridLayout.spec(col, 1, GridLayout.FILL);
+            params.setGravity(Gravity.CENTER);
+            appContainer.setLayoutParams(params);
+            
+            // 创建图标
+            ImageView appIcon = new ImageView(requireContext());
+            appIcon.setLayoutParams(new LinearLayout.LayoutParams(iconSize, iconSize));
+            IconUtils.setRoundedIcon(requireContext(), appIcon, app.appIcon, 20f);
+            appIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            
+            // 创建应用名称 - 放大字体
+            TextView appName = new TextView(requireContext());
+            appName.setText(app.appName);
+            appName.setTextColor(Color.WHITE);
+            appName.setTextSize(16); // 放大字体大小
+            appName.setPadding(0, 10, 0, 0); // 增加顶部间距
+            appName.setGravity(Gravity.CENTER);
+            appName.setMaxLines(1);
+            appName.setEllipsize(TextUtils.TruncateAt.END);
+            appName.setTypeface(null, Typeface.BOLD); // 设置为粗体以增强可读性
+            
+            // 添加到容器
+            appContainer.addView(appIcon);
+            appContainer.addView(appName);
+            
+            // 设置点击事件
+            appContainer.setOnClickListener(v -> {
+                try {
+                    Intent launchIntent = pm.getLaunchIntentForPackage(app.packageName);
+                    if (launchIntent != null) {
+                        startActivity(launchIntent);
+                        
+                        // 关闭对话框
+                        closeAllDialogs();
+                    }
+                } catch (Exception e) {
+                    Log.e("HomeFragment", "启动应用失败: " + e.getMessage());
+                    Toast.makeText(requireContext(), "无法启动应用", Toast.LENGTH_SHORT).show();
+                }
+            });
+            
+            // 添加到网格
+            grid.addView(appContainer);
+        }
+        
+        // 如果应用数量超过一页，显示"更多"按钮或分页指示器
+        if (apps.size() > rowCount * columnCount) {
+            // 在这里可以添加分页功能
+            Toast.makeText(requireContext(), "共有 " + apps.size() + " 个应用", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    int dpToPx(int dp) {
+        return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
     }
 }

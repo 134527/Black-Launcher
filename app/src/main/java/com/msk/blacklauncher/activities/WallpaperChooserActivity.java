@@ -169,8 +169,8 @@ public class WallpaperChooserActivity extends AppCompatActivity implements Wallp
                 outRect.right = horizontalMargin;
             } else {
                 // 中间列：不添加边距
-                outRect.left = horizontalMargin;
-                outRect.right = horizontalMargin;
+                outRect.left = 0;
+                outRect.right = 0;
             }
             
             // 添加垂直间距
@@ -302,7 +302,6 @@ public class WallpaperChooserActivity extends AppCompatActivity implements Wallp
                                 assetUri,
                                 "内置壁纸",
                                 true);
-                        
                         // 加载高质量缩略图
                         try (InputStream is = assetManager.open(assetPath)) {
                             // 创建缩略图但提高质量

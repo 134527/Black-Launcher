@@ -7,4 +7,22 @@
     <dimen name="page_indicator_margin">4dp</dimen>
     <!-- 页面指示器圆点大小 -->
     <dimen name="dot_size">8dp</dimen>
+    
+    <!-- 固定大小文本尺寸 -->
+    <dimen name="fixed_text_size">16sp</dimen>
+    
+    <!-- 固定UI元素尺寸 -->
+    <dimen name="fixed_button_height">48dp</dimen>
+    <dimen name="fixed_card_corner_radius">24dp</dimen>
+    <dimen name="fixed_margin">16dp</dimen>
+    <dimen name="fixed_padding">8dp</dimen>
+    
+    <!-- 固定图标尺寸 -->
+    <dimen name="fixed_icon_size">48dp</dimen>
+    <dimen name="fixed_large_icon_size">64dp</dimen>
+    
+    <!-- 固定布局网格尺寸 -->
+    <dimen name="fixed_grid_spacing">8dp</dimen>
+    <dimen name="fixed_grid_cell_width">80dp</dimen>
+    <dimen name="fixed_grid_cell_height">80dp</dimen>
 </resources>
